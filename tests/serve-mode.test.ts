@@ -75,3 +75,40 @@ describe("serve mode", () => {
 		assert.equal(fired, 1);
 	});
 });
+
+describe("shared brain over Tailscale", () => {
+	const status = {
+		Peer: {
+			a: { DNSName: "5090v1.tail8e67fe.ts.net.", Online: true },
+			b: { DNSName: "iphone.tail8e67fe.ts.net.", Online: true },
+			c: { DNSName: "old-pc.tail8e67fe.ts.net.", Online: false },
+			d: { DNSName: "", Online: true },
+		},
+	};
+	const fakeExec = (json: unknown) => ((_cmd: string, _args: string[], _opts: unknown, cb: (e: Error | null, out: string) => void) => cb(null, JSON.stringify(json))) as never;
+
+	it("only online peers, as tailnet http URLs", () => {
+		assert.deepEqual(serve.peerUrls(status), ["http://5090v1.tail8e67fe.ts.net", "http://iphone.tail8e67fe.ts.net"]);
+		assert.equal(serve.isTailnetUrl("http://5090v1.tail8e67fe.ts.net"), true);
+		assert.equal(serve.isTailnetUrl("http://evil.example.com"), false);
+		assert.equal(serve.isTailnetUrl("http://x.ts.net/path"), false);
+	});
+	it("finds the peer that answers as Meander, remembers it, tries it first next time", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-brain-"));
+		const probed: string[] = [];
+		const probe = async (u: string) => (probed.push(u), u.includes("5090v1"));
+		const found = await serve.findTailnetBrain(dir, { execFile: fakeExec(status), cli: "/x/tailscale", probe });
+		assert.equal(found, "http://5090v1.tail8e67fe.ts.net");
+		assert.equal(serve.rememberedBrain(dir), found);
+		probed.length = 0;
+		assert.equal(await serve.findTailnetBrain(dir, { execFile: fakeExec({}), cli: "/x/tailscale", probe }), found);
+		assert.deepEqual(probed, [found], "remembered server answered: no scan");
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+	it("no Tailscale, or nobody answers: null (the app runs its own server)", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-brain-"));
+		assert.equal(await serve.findTailnetBrain(dir, { execFile: fakeExec(status), cli: "/x/tailscale", probe: async () => false }), null);
+		assert.equal(serve.rememberedBrain(dir), null);
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+});

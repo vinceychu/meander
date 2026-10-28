@@ -74,6 +74,94 @@ async function attachableServer(userData) {
 	return url && (await isUp(url)) ? url : null;
 }
 
+// ─── Shared brain over Tailscale (2026-10-28) ──────────────────────────────
+// A desktop app with no server of its own on this machine looks for one on
+// the owner's tailnet (e.g. the PC that runs `--serve`) and uses it, so the
+// Mac, the phone and the PC share one Meander: same notes, chats and tools,
+// with the tools running on the machine that has the GPU / lab cluster.
+// The tailnet is private to the owner's devices and encrypted end to end.
+// The last server found is remembered and tried first; when none answers
+// (offline, Tailscale off), the app runs its own local server as before.
+
+const TAILSCALE_CLIS = [
+	"/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+	"/usr/local/bin/tailscale",
+	"/opt/homebrew/bin/tailscale",
+	"/usr/bin/tailscale",
+];
+
+function brainFile(userData) {
+	return path.join(userData, "brain.json");
+}
+
+/** Only tailnet MagicDNS hosts over http (no path): what tailscale serve publishes. */
+function isTailnetUrl(url) {
+	return typeof url === "string" && /^http:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net$/i.test(url);
+}
+
+function rememberedBrain(userData) {
+	try {
+		const { url } = JSON.parse(fs.readFileSync(brainFile(userData), "utf8"));
+		return isTailnetUrl(url) ? url : null;
+	} catch {
+		return null;
+	}
+}
+
+function rememberBrain(userData, url) {
+	try {
+		fs.writeFileSync(brainFile(userData), JSON.stringify({ url, at: new Date().toISOString() }));
+	} catch {
+		/* best effort */
+	}
+}
+
+/** Online tailnet peers as http://<magicdns-name> URLs (pure — tested). */
+function peerUrls(status) {
+	return Object.values(status?.Peer ?? {})
+		.filter((p) => p?.Online && typeof p.DNSName === "string" && p.DNSName)
+		.map((p) => `http://${p.DNSName.replace(/\.$/, "")}`)
+		.filter(isTailnetUrl);
+}
+
+function tailscaleStatus(execFile, cli = TAILSCALE_CLIS.find((c) => fs.existsSync(c))) {
+	if (!cli) return Promise.resolve(null);
+	return new Promise((resolve) =>
+		execFile(cli, ["status", "--json"], { timeout: 4000 }, (err, stdout) => {
+			try {
+				resolve(err ? null : JSON.parse(stdout));
+			} catch {
+				resolve(null);
+			}
+		}),
+	);
+}
+
+/** The shared Meander server on the tailnet, or null.
+ * @param {string} userData
+ * @param {{ execFile?: Function, cli?: string, probe?: (url: string, timeoutMs?: number) => Promise<boolean>, log?: (m: string) => void }} [opts]
+ * @returns {Promise<string | null>} */
+async function findTailnetBrain(userData, { execFile = require("node:child_process").execFile, cli, probe = isUp, log = () => {} } = {}) {
+	const known = rememberedBrain(userData);
+	if (known && (await probe(known, 2500))) return known;
+	const status = await tailscaleStatus(execFile, cli);
+	const urls = peerUrls(status).filter((u) => u !== known);
+	if (urls.length === 0) return null;
+	const found = await new Promise((resolve) => {
+		let left = urls.length;
+		for (const u of urls)
+			void probe(u, 2500).then((ok) => {
+				if (ok) resolve(u);
+				else if (--left === 0) resolve(null);
+			});
+	});
+	if (found) {
+		log(`shared brain found on the tailnet: ${found}`);
+		rememberBrain(userData, found);
+	}
+	return found;
+}
+
 /** Call onReplaced() once the file at `file` changes on disk (an update
  *  swapped the AppImage). Polls; returns a stop function. */
 function watchReplaced(file, onReplaced, everyMs = 60_000) {
@@ -96,4 +184,4 @@ function watchReplaced(file, onReplaced, everyMs = 60_000) {
 	return () => clearInterval(t);
 }
 
-module.exports = { DEFAULT_PORT, serveFile, servePort, writeServeUrl, clearServeUrl, readServeUrl, isUp, attachableServer, watchReplaced };
+module.exports = { isTailnetUrl, peerUrls, rememberedBrain, rememberBrain, findTailnetBrain, DEFAULT_PORT, serveFile, servePort, writeServeUrl, clearServeUrl, readServeUrl, isUp, attachableServer, watchReplaced };

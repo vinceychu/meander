@@ -1049,6 +1049,12 @@ async function main() {
 	process.on("exit", killServer);
 	process.on("SIGHUP", killServer);
 
+	// The shared brain is plain http inside the (encrypted) tailnet; let the
+	// microphone work there. Must be set before ready, so it uses the server
+	// remembered from the previous launch.
+	const brain = serveMode.rememberedBrain(app.getPath("userData"));
+	if (brain) app.commandLine.appendSwitch("unsafely-treat-insecure-origin-as-secure", brain);
+
 	await app.whenReady();
 
 	// Multi-device presence (fork, 2026-10-26) — packaged app only (dev
@@ -1070,6 +1076,10 @@ async function main() {
 	// A running `--serve` instance owns this data folder: attach to it
 	// rather than start a second server on the same files.
 	attachedServer = devUrl ? null : await serveMode.attachableServer(app.getPath("userData"));
+	// No server of our own here: use the shared one on the owner's tailnet.
+	if (!devUrl && !attachedServer && app.isPackaged && !process.argv.includes("--local") && process.env.LH_SHARED_BRAIN !== "0") {
+		attachedServer = await serveMode.findTailnetBrain(app.getPath("userData"), { log });
+	}
 	const external = devUrl ?? attachedServer;
 	const url = external ?? `http://127.0.0.1:${await freePort()}`;
 	if (!external) {
