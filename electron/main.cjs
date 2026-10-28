@@ -546,6 +546,7 @@ async function stageMacUpdate(info) {
 	if (!appPath || !macSelfUpdate.canReplace(appPath)) {
 		log(`mac self-update: can't replace ${appPath ?? process.execPath} — install the new version by hand`);
 		reportUpdateStatus("error");
+		if (appPath && macSelfUpdate.isTranslocated(appPath)) void askToMoveToApplications();
 		return;
 	}
 	macStaging = true;
@@ -564,8 +565,55 @@ async function stageMacUpdate(info) {
 function installMacUpdate(relaunch) {
 	if (!macStaged) return;
 	const appPath = macSelfUpdate.appBundlePath(process.execPath);
-	if (appPath) macSelfUpdate.spawnInstaller({ stagedApp: macStaged.stagedApp, appPath, relaunch, log });
+	if (appPath) {
+		const logs = path.join(app.getPath("userData"), "logs");
+		fs.mkdirSync(logs, { recursive: true });
+		macSelfUpdate.spawnInstaller({
+			stagedApp: macStaged.stagedApp,
+			appPath,
+			relaunch,
+			version: macStaged.version,
+			logFile: path.join(logs, "mac-update.log"),
+			resultFile: MAC_UPDATE_RESULT(),
+			log,
+		});
+	}
 	macStaged = null;
+}
+
+const MAC_UPDATE_RESULT = () => path.join(app.getPath("userData"), "mac-update-result.json");
+const APP_MANAGEMENT_PANE = "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles";
+
+/** At launch: how did the last self-update go? If macOS refused it (App
+ *  Management, macOS 13+), ask once for the permission; the next check
+ *  downloads and installs again. */
+async function reportLastMacUpdate() {
+	const r = macSelfUpdate.takeInstallResult(MAC_UPDATE_RESULT());
+	if (!r) return;
+	log(`mac self-update: last install of ${r.version || "?"} — ${r.outcome}`);
+	if (r.outcome !== "failed") return;
+	const { response } = await dialog.showMessageBox({
+		type: "info",
+		message: "Meander needs your OK once to update itself",
+		detail:
+			"macOS blocked the update. In System Settings → Privacy & Security → App Management, turn on Meander, then quit and reopen Meander. Updates install by themselves after that.",
+		buttons: ["Open Settings", "Later"],
+		defaultId: 0,
+		cancelId: 1,
+	});
+	if (response === 0) void shell.openExternal(APP_MANAGEMENT_PANE);
+}
+
+/** macOS runs a downloaded app from a read-only copy until it is moved. */
+async function askToMoveToApplications() {
+	if (askToMoveToApplications.asked) return;
+	askToMoveToApplications.asked = true;
+	await dialog.showMessageBox({
+		type: "info",
+		message: "Move Meander to your Applications folder",
+		detail: "Meander can only update itself from Applications. Quit Meander, drag it into Applications in Finder, and open it from there.",
+		buttons: ["OK"],
+	});
 }
 
 function setupAutoUpdater() {
@@ -1083,7 +1131,10 @@ async function main() {
 	});
 
 	installMenu();
-	if (process.platform === "darwin" && app.isPackaged) refreshMacIdentity();
+	if (process.platform === "darwin" && app.isPackaged) {
+		refreshMacIdentity();
+		void reportLastMacUpdate();
+	}
 
 	// Linux AppImage: keep the app-menu entry + icon in step with this build,
 	// so a rename or new icon shows up after an update (linux-desktop-entry.cjs).

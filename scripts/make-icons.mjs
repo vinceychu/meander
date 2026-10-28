@@ -1,5 +1,5 @@
 // Regenerate the icon set from the design source build/icon-meander.svg
-// (Meander's waterfall, 2026-10-27; it reuses build/icon-flat.svg's squircle).
+// (Meander's mark, 2026-10-28, drawn by scripts/make-mark.mjs; it reuses build/icon-flat.svg's squircle).
 //
 //   build/icon.ico  — Windows (.ico with 16/24/32/48/64/128/256 PNG entries)
 //   build/icon.png  — Linux (512×512; AppImage/deb/desktop entry)
@@ -75,3 +75,16 @@ writeFileSync(path.join(root, "build", "icon.icns"), icns);
 // The running Mac app sets its Dock/About icon from this (electron/main.cjs).
 writeFileSync(path.join(root, "build", "icon-mac.png"), renderMac(512));
 console.log(`build/icon.icns ${ICNS.length} entries — ${(icns.length / 1024).toFixed(1)} KB`);
+
+// ---- web: favicon, phone home-screen icon, PWA icons, README ------------
+// Full-bleed square tiles (browsers and iOS round the corners themselves).
+const square = svg.replace(/ clip-path="url\(#sq\)"/, "");
+const renderSquare = (size) => new Resvg(square, { fitTo: { mode: "width", value: size } }).render().asPng();
+for (const [file, size] of [
+	["app/icon.png", 64],
+	["app/apple-icon.png", 180],
+	["public/icons/icon-192.png", 192],
+	["public/icons/icon-512.png", 512],
+]) writeFileSync(path.join(root, file), renderSquare(size));
+writeFileSync(path.join(root, "docs", "assets", "meander-icon.png"), render(512));
+console.log("web icons: app/icon.png, app/apple-icon.png, public/icons/*, docs/assets/meander-icon.png");

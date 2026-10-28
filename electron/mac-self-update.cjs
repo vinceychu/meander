@@ -40,38 +40,71 @@ function q(s) {
 	return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
-/** The swap script (pure — tested as text).
+/** The swap script (pure — tested as text, and run with stubbed macOS tools
+ * in tests/data-location.test.ts).
  *
  * Updates the bundle IN PLACE (rsync into the same directory) and, if the
  * new build has a different name, renames that same directory. The Dock
  * remembers apps by their file identity, so an in-place update + rename
  * keeps the Dock pin; replacing the bundle with a new copy would leave a
  * "?" in the Dock. A name or icon change also restarts the Dock once so it
- * redraws (macOS caches both). A full copy of the old bundle is kept as
- * <name>.app.previous until the update succeeds, and restored if it fails. */
-function installScript({ pid, appPath, stagedApp, relaunch }) {
+ * redraws (macOS caches both).
+ *
+ * macOS 13+ "App Management" can refuse an app without a Developer ID
+ * writing into an app bundle (its own included). Then the in-place copy
+ * fails before changing anything, and the script falls back to swapping
+ * whole bundles by rename (old one into the temp dir, staged one in). If that is
+ * refused too, the old app is left as it was and relaunched, and the
+ * result file says "failed" — the app then asks for App Management once.
+ * Every step is logged to `logFile`; the outcome goes to `resultFile`. */
+function installScript({ pid, appPath, stagedApp, relaunch, version = "", logFile = "/dev/null", resultFile = "/dev/null" }) {
 	const prev = `${appPath}.previous`;
+	// Out of /Applications, so a leftover never shows up as a second app.
+	// Same volume as the temp dir on macOS, so the move is a rename.
+	const aside = path.join(path.dirname(path.dirname(stagedApp)), "previous-version.app");
 	const target = path.join(path.dirname(appPath), path.basename(stagedApp));
 	const renamed = target !== appPath;
 	const icon = (app) => `${app}/Contents/Resources/icon.icns`;
+	const v = String(version).replace(/[^0-9A-Za-z.+-]/g, "");
 	return [
 		"#!/bin/sh",
+		'PATH="${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"',
+		`LOG=${q(logFile)}`,
+		'say() { echo "$(date \'+%Y-%m-%d %H:%M:%S\') $*" >> "$LOG"; }',
+		`result() { printf '{"version":"${v}","outcome":"%s"}\\n' "$1" > ${q(resultFile)}; say "result: $1"; }`,
+		// Re-sign ad-hoc (the copy invalidated the old seal), clear quarantine, bump mtime.
+		'finish() { xattr -cr "$1" 2>/dev/null; codesign --force --deep --sign - "$1" >>"$LOG" 2>&1 || say "codesign failed"; touch "$1"; }',
 		`while kill -0 ${Number(pid)} 2>/dev/null; do sleep 0.3; done`,
-		`rm -rf ${q(prev)}`,
-		`ditto ${q(appPath)} ${q(prev)} || exit 1`,
-		`if rsync -a --delete ${q(stagedApp + "/")} ${q(appPath + "/")}; then`,
-		renamed ? `  rm -rf ${q(target)} && mv ${q(appPath)} ${q(target)}` : "  :",
-		`  xattr -cr ${q(target)} 2>/dev/null`,
-		`  codesign --force --deep --sign - ${q(target)} 2>/dev/null`,
-		`  touch ${q(target)}`,
-		renamed
-			? "  killall Dock 2>/dev/null"
-			: `  cmp -s ${q(icon(prev))} ${q(icon(target))} || killall Dock 2>/dev/null`,
-		`  rm -rf ${q(prev)}`,
+		`say "installing ${v} into ${appPath.replace(/["$`\\]/g, "")}"`,
+		`rm -rf ${q(prev)} ${q(aside)}`,
+		"INPLACE=0",
+		`if ditto ${q(appPath)} ${q(prev)} 2>>"$LOG"; then`,
+		`  if rsync -a --delete ${q(stagedApp + "/")} ${q(appPath + "/")} 2>>"$LOG"; then INPLACE=1`,
+		`  else say "in-place update refused"; rsync -a --delete ${q(prev + "/")} ${q(appPath + "/")} 2>/dev/null; fi`,
 		"else",
-		`  rsync -a --delete ${q(prev + "/")} ${q(appPath + "/")} && rm -rf ${q(prev)}`,
+		'  say "backup refused"',
 		"fi",
-		relaunch ? `if [ -d ${q(target)} ]; then open ${q(target)}; else open ${q(appPath)}; fi` : ":",
+		'if [ "$INPLACE" = 1 ]; then',
+		renamed
+			? `  if rm -rf ${q(target)} && mv ${q(appPath)} ${q(target)}; then APP=${q(target)}; killall Dock 2>/dev/null; else say "rename failed"; APP=${q(appPath)}; fi`
+			: `  APP=${q(appPath)}; cmp -s ${q(icon(prev))} ${q(icon(appPath))} || killall Dock 2>/dev/null`,
+		'  finish "$APP"',
+		`  rm -rf ${q(prev)}`,
+		"  result updated",
+		"else",
+		'  say "swapping the whole bundle"',
+		`  rm -rf ${q(prev)}`,
+		`  if mv ${q(appPath)} ${q(aside)} 2>>"$LOG"; then`,
+		`    if { [ ${q(target)} = ${q(appPath)} ] || rm -rf ${q(target)}; } && mv ${q(stagedApp)} ${q(target)} 2>>"$LOG"; then`,
+		`      APP=${q(target)}; finish "$APP"; rm -rf ${q(aside)}; killall Dock 2>/dev/null; result replaced`,
+		"    else",
+		`      mv ${q(aside)} ${q(appPath)}; APP=${q(appPath)}; result failed`,
+		"    fi",
+		"  else",
+		`    APP=${q(appPath)}; result failed`,
+		"  fi",
+		"fi",
+		relaunch ? 'open "$APP"' : ":",
 		"",
 	].join("\n");
 }
@@ -120,16 +153,22 @@ async function downloadAndStage(info, { releaseBase, arch = process.arch, log = 
 }
 
 /** Spawn the detached swap script; the caller then quits the app. */
-function spawnInstaller({ stagedApp, appPath, relaunch, log = () => {} }) {
-	const script = path.join(path.dirname(stagedApp), "install.sh");
-	fs.writeFileSync(script, installScript({ pid: process.pid, appPath, stagedApp, relaunch }), { mode: 0o755 });
+function spawnInstaller({ stagedApp, appPath, relaunch, version, logFile, resultFile, log = () => {} }) {
+	const script = path.join(path.dirname(path.dirname(stagedApp)), "install.sh");
+	fs.writeFileSync(script, installScript({ pid: process.pid, appPath, stagedApp, relaunch, version, logFile, resultFile }), { mode: 0o755 });
 	const child = spawn("/bin/sh", [script], { detached: true, stdio: "ignore" });
 	child.unref();
 	log(`mac self-update: installer spawned (relaunch=${relaunch})`);
 }
 
+/** Is the app running from a quarantine copy macOS made (read-only)? */
+function isTranslocated(appPath) {
+	return /\/AppTranslocation\//.test(appPath);
+}
+
 /** Can the running bundle be replaced (its parent dir writable)? */
 function canReplace(appPath) {
+	if (isTranslocated(appPath)) return false;
 	try {
 		fs.accessSync(path.dirname(appPath), fs.constants.W_OK);
 		return true;
@@ -138,4 +177,15 @@ function canReplace(appPath) {
 	}
 }
 
-module.exports = { pickMacZip, appBundlePath, installScript, downloadAndStage, spawnInstaller, canReplace };
+/** Read and remove the last install's outcome ({ version, outcome } or null). */
+function takeInstallResult(resultFile) {
+	try {
+		const r = JSON.parse(fs.readFileSync(resultFile, "utf8"));
+		fs.rmSync(resultFile, { force: true });
+		return r && typeof r.outcome === "string" ? r : null;
+	} catch {
+		return null;
+	}
+}
+
+module.exports = { pickMacZip, appBundlePath, installScript, downloadAndStage, spawnInstaller, canReplace, isTranslocated, takeInstallResult };
