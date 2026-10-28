@@ -50,7 +50,7 @@ import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./com
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
-import { cliAgentTools } from "./cli-tools.ts";
+import { cliAgentTools, defaultCliAgentTools } from "./cli-tools.ts";
 import { asAgentMessages } from "../core/native-messages.ts";
 import {
 	ChatInputError,
@@ -479,6 +479,7 @@ export async function handleChatInput(
 						// The registry drop's signal (2026-09-20): no live engine
 						// = no research tool in the teacher's registry.
 						searchAvailable,
+						extraTools: defaultCliAgentTools(),
 					},
 					agentOpts,
 				)
@@ -497,6 +498,7 @@ export async function handleChatInput(
 						// knowledge graph through tools when the gate opens —
 						// graph master switch AND the agent.graphTools toggle.
 						...(graphToolsEnabled(effective) ? { graphStore: stores.graphStore } : {}),
+						extraTools: defaultCliAgentTools(),
 					},
 					agentOpts,
 				);

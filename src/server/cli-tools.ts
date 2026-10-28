@@ -67,3 +67,8 @@ export function cliAgentTools(names: readonly string[] | undefined): Record<stri
 	const wanted = new Set(names);
 	return cliTools(tools.filter((t) => wanted.has(t.name)), dir);
 }
+
+/** Tools a teaching session gets without being asked: the "default": true ones. */
+export function defaultCliAgentTools(): Record<string, AgentTool<any>> {
+	return cliAgentTools(loadCliTools().tools.filter((t) => t.default).map((t) => t.name));
+}

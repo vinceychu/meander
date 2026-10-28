@@ -272,7 +272,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
  * handler keys teacher construction on.
  */
 export function createProberAgent(ctx: ProberToolContext, opts: AgentBuildOptions = {}) {
-	return baseAgentOptions("prober", opts, Object.values(createProberTools(ctx, opts.toolToggles)));
+	return baseAgentOptions("prober", opts, [...Object.values(createProberTools(ctx, opts.toolToggles)), ...Object.values(ctx.extraTools ?? {})]);
 }
 
 /**
@@ -289,7 +289,7 @@ export function createTeacherAgent(
 	opts: AgentBuildOptions = {},
 ) {
 	const tools = opts.tools ?? (ctx ? createTeacherTools(ctx, opts.toolToggles) : bareQuestionTools());
-	return baseAgentOptions("teacher", opts, Object.values(tools));
+	return baseAgentOptions("teacher", opts, [...Object.values(tools), ...(opts.tools ? [] : Object.values(ctx?.extraTools ?? {}))]);
 }
 
 /** The bare teach question set (tests, bare agents): quiz with the shared

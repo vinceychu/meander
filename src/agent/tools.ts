@@ -264,6 +264,9 @@ export const probeExplainTool: AgentTool<typeof explainInputBase> = {
  *  ProbeDoneContext) PLUS the job-dispatch wiring, since the owner ruling
  *  (2026-09-20) puts research + pdf in the probe phase's registry too. */
 export interface ProberToolContext extends ProbeDoneContext {
+	/** The learner's default CLI tools (data/tools/*.json with "default": true),
+	 *  e.g. lab graders — available in teaching sessions too (2026-10-28). */
+	extraTools?: Record<string, AgentTool<any>>;
 	/** Creates the job record (deduped by toolCallId). */
 	jobStore: JobStore;
 	/** Fire the background runner for a freshly created job. */
@@ -391,6 +394,9 @@ export function teachQuizToolFor(ctx: Pick<PlanToolContext, "chatId" | "chatStor
 }
 
 export interface TeacherToolContext extends PlanToolContext {
+	/** The learner's default CLI tools (data/tools/*.json with "default": true),
+	 *  e.g. lab graders — available in teaching sessions too (2026-10-28). */
+	extraTools?: Record<string, AgentTool<any>>;
 	/** Job-tool wiring (sub-agent dispatch): the job store + the runner's
 	 *  spawn seam. The composition root injects both. */
 	jobStore: JobStore;
