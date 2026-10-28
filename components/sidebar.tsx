@@ -136,7 +136,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 		const stored = localStorage.getItem(STORAGE_KEY);
 		// Default: open (first run introduces the sidebar). On a phone it
 		// always starts closed — it's a drawer there, not a column.
-		const isPhone = window.matchMedia(`(max-width: ${PHONE_MAX}px)`).matches;
+		const isPhone = window.matchMedia?.(`(max-width: ${PHONE_MAX}px)`).matches ?? false;
 		setPhone(isPhone);
 		setOpen(isPhone ? false : stored === null ? true : stored === "1");
 		setMounted(true);
@@ -156,7 +156,8 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	}, []);
 
 	useEffect(() => {
-		const mq = window.matchMedia(`(max-width: ${PHONE_MAX}px)`);
+		const mq = window.matchMedia?.(`(max-width: ${PHONE_MAX}px)`);
+		if (!mq) return;
 		const onChange = () => setPhone(mq.matches);
 		mq.addEventListener("change", onChange);
 		return () => mq.removeEventListener("change", onChange);

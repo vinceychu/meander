@@ -916,12 +916,32 @@ function refreshMacIdentity() {
 }
 
 async function serveMain() {
-	process.on("exit", killServer);
-	process.on("SIGHUP", killServer);
-	process.on("SIGTERM", () => {
-		killServer();
-		app.exit(0);
+	// Never leave the server child behind holding the port: stop it, wait
+	// for it to exit (SIGKILL after 5s), then exit with `code`.
+	let stopping = false;
+	const stopAndExit = (code) => {
+		if (stopping) return;
+		stopping = true;
+		const child = serverProcess;
+		serverProcess = null;
+		if (!child || child.exitCode !== null) return app.exit(code);
+		const force = setTimeout(() => child.kill("SIGKILL"), 5000);
+		child.once("exit", () => {
+			clearTimeout(force);
+			app.exit(code);
+		});
+		child.kill("SIGTERM");
+	};
+	// Electron turns SIGTERM/SIGINT into an app quit before Node's handlers
+	// run, so the quit itself must wait for the child too.
+	app.on("before-quit", (event) => {
+		if (stopping) return;
+		event.preventDefault();
+		stopAndExit(0);
 	});
+	process.on("SIGTERM", () => stopAndExit(0));
+	process.on("SIGINT", () => stopAndExit(0));
+	process.on("SIGHUP", () => stopAndExit(0));
 	await app.whenReady();
 	const userData = app.getPath("userData");
 	const port = serveMode.servePort(process.argv);
@@ -933,7 +953,9 @@ async function serveMain() {
 	}
 	log(`serve: starting on ${url} · data dir: ${DATA_DIR()}`);
 	const child = await startServer(port, { desktop: false });
-	child.on("exit", () => app.exit(1));
+	child.on("exit", () => {
+		if (!stopping) app.exit(1); // crashed: systemd restarts us
+	});
 	await waitUntilUp(url);
 	serveMode.writeServeUrl(userData, url);
 	app.on("will-quit", () => serveMode.clearServeUrl(userData));
@@ -943,8 +965,17 @@ async function serveMain() {
 	// Headless: install as soon as an update is downloaded; systemd restarts us.
 	autoUpdater?.on("update-downloaded", () => {
 		log("serve: update downloaded — installing and exiting for restart");
-		killServer();
-		autoUpdater.quitAndInstall(true, false);
+		const child = serverProcess;
+		stopping = true;
+		serverProcess = null;
+		const install = () => autoUpdater.quitAndInstall(true, false);
+		if (!child || child.exitCode !== null) return install();
+		const force = setTimeout(() => child.kill("SIGKILL"), 5000);
+		child.once("exit", () => {
+			clearTimeout(force);
+			install();
+		});
+		child.kill("SIGTERM");
 	});
 	checkForUpdates();
 	setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
@@ -952,8 +983,7 @@ async function serveMain() {
 	if (process.env.APPIMAGE) {
 		serveMode.watchReplaced(process.env.APPIMAGE, () => {
 			log("serve: the app file was updated — exiting for restart");
-			killServer();
-			app.exit(0);
+			stopAndExit(0);
 		});
 	}
 }
