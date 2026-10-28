@@ -5,6 +5,9 @@ After=network-online.target
 [Service]
 # The installed app in server-only mode (electron/serve-mode.cjs). It updates
 # itself and exits; systemd then restarts it on the new version.
+# No libfuse2 on newer Ubuntu: unpack to /tmp and run (still auto-updates;
+# the updater reads $APPIMAGE, which the runtime sets).
+Environment=APPIMAGE_EXTRACT_AND_RUN=1
 ExecStart=%h/Applications/LearnHarness.AppImage --serve --port=8710 --ozone-platform=headless --disable-gpu
 Restart=always
 RestartSec=5
