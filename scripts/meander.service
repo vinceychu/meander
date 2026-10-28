@@ -1,0 +1,13 @@
+[Unit]
+Description=Meander server (phone + this PC's desktop app share it; private to your tailnet)
+After=network-online.target
+
+[Service]
+# The installed app in server-only mode (electron/serve-mode.cjs). It updates
+# itself and exits; systemd then restarts it on the new version.
+ExecStart=%h/Applications/LearnHarness.AppImage --serve --port=8710 --ozone-platform=headless --disable-gpu
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
