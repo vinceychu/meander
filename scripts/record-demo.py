@@ -5,7 +5,9 @@ Starts a throwaway instance (no keys, its own empty data folder, its own build
 folder, so it never touches your data or another dev server), drives it
 in Chromium with Playwright, records the screen, and prints the video path.
 
-    python3 scripts/record-demo.py steps.json [--out demo.webm] [--port 3007] [--phone]
+    python3 scripts/record-demo.py steps.json [--out demo.mp4] [--port 3007] [--phone]
+
+An .mp4 out (plays on Mac/iPhone) needs ffmpeg with libx264: on PATH or in $FFMPEG.
 
 steps.json is a list of steps, run in order:
     {"caption": "Opening Settings"}            on-screen caption for the viewer
@@ -72,7 +74,7 @@ def wait_up(url, server, timeout=180):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("steps")
-    ap.add_argument("--out", default="demo.webm")
+    ap.add_argument("--out", default="demo.mp4")
     ap.add_argument("--port", type=int, default=3007)
     ap.add_argument("--phone", action="store_true", help="record at iPhone size")
     a = ap.parse_args()
@@ -153,7 +155,14 @@ def main():
             video = page.video.path()
             ctx.close()
             browser.close()
-        os.replace(video, out)
+        if out.suffix == ".mp4":
+            ffmpeg = os.environ.get("FFMPEG") or shutil.which("ffmpeg")
+            if not ffmpeg:
+                sys.exit("an .mp4 needs ffmpeg (set $FFMPEG); or use --out x.webm")
+            subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", video, "-c:v", "libx264",
+                            "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-crf", "23", str(out)], check=True)
+        else:
+            os.replace(video, out)
     finally:
         # Stop the server first, so nothing rewrites files after we restore them.
         for sig, wait in ((signal.SIGTERM, 10), (signal.SIGKILL, 5)):
