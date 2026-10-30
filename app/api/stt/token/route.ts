@@ -11,7 +11,7 @@
  *
  * NOTE: the key needs ≥ Member permission in the Deepgram console to call
  * /auth/grant (their docs, token-based auth FAQ) — plain read/transcribe
- * keys return FORBIDDEN here.
+ * keys return FORBIDDEN here; then the route returns the key itself.
  */
 import { keyValue } from "@/src/server";
 
@@ -30,6 +30,10 @@ export async function GET() {
 			headers: { Authorization: `Token ${key}`, "Content-Type": "application/json" },
 			body: JSON.stringify({ ttl_seconds: 300 }),
 		});
+		// A key below Member can't mint tokens but can still transcribe: hand it
+		// over as-is (the socket then authenticates with the key itself) rather
+		// than send the owner back to the Deepgram console.
+		if (res.status === 403) return Response.json({ key });
 		if (!res.ok) {
 			const detail = await res.text();
 			return Response.json(

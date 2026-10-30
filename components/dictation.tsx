@@ -118,13 +118,18 @@ export const DICTATION_KEYLESS = "Dictation needs a Deepgram key";
  *  (zero-keys wave, owner 2026-09-25). */
 async function mintFreshToken(): Promise<string> {
 	const res = await fetch("/api/stt/token");
-	const data = (await res.json()) as { token?: string; message?: string };
+	const data = (await res.json()) as { token?: string; key?: string; message?: string };
+	if (res.ok && data.key) return KEY_PREFIX + data.key;
 	if (!res.ok || !data.token) {
 		if (res.status === 503) throw new Error(DICTATION_KEYLESS);
 		throw new Error(data.message ?? `token route ${res.status}`);
 	}
 	return data.token;
 }
+
+/** Marks a raw Deepgram key (the route's fallback for keys that can't
+ *  mint tokens): it authenticates with the "token" subprotocol. */
+const KEY_PREFIX = "key:";
 
 /** Warm-token cache (mitigation D, owner 2026-09-27): the click path takes
  *  the cached promise instead of a remote mint. TTL keeps a cached token
@@ -353,7 +358,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			// Minted JWTs authenticate via the "bearer" subprotocol — ["token",
 			// jwt] is rejected at the handshake (verified live; "token" is for
 			// raw API keys only, as in the owner's pi dictate extension).
-			const ws = new WebSocket(deepgramListenUrl(language), ["bearer", token]);
+			const protocols = token.startsWith(KEY_PREFIX) ? ["token", token.slice(KEY_PREFIX.length)] : ["bearer", token];
+			const ws = new WebSocket(deepgramListenUrl(language), protocols);
 			wsRef.current = ws;
 
 			ws.addEventListener("open", () => {

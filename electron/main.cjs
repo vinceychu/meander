@@ -1079,6 +1079,7 @@ async function main() {
 	// No server of our own here: use the shared one on the owner's tailnet.
 	if (!devUrl && !attachedServer && app.isPackaged && !process.argv.includes("--local") && process.env.LH_SHARED_BRAIN !== "0") {
 		attachedServer = await serveMode.findTailnetBrain(app.getPath("userData"), { log });
+		if (attachedServer) void serveMode.shareLocalKeys(attachedServer, AUTH_FILE(), { log }).catch((e) => log(`sharing keys failed: ${e}`));
 	}
 	const external = devUrl ?? attachedServer;
 	const url = external ?? `http://127.0.0.1:${await freePort()}`;

@@ -54,7 +54,8 @@ describe("AuthStore adapter", () => {
 		assert.equal(vars.OPENROUTER_API_KEY, "sk-or-v1-new");
 	});
 
-	it("corrupt/non-object file = {} — never throws, looks like first boot", () => {
+	it("corrupt/non-object file with no backup = {} — never throws, looks like first boot", () => {
+		fs.rmSync(path.join(TMP, "auth.backup.json"), { force: true });
 		fs.writeFileSync(AUTH_FILE, "{not json");
 		assert.deepEqual(authStore.authVars(), {});
 		fs.writeFileSync(AUTH_FILE, JSON.stringify(["an", "array"]));

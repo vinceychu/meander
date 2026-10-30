@@ -162,6 +162,34 @@ async function findTailnetBrain(userData, { execFile = require("node:child_proce
 	return found;
 }
 
+/** Keys typed into this device before it used the shared brain live in
+ *  its own auth.json; copy any the brain lacks so they never "vanish".
+ *  The brain's own keys always win (never overwritten). */
+async function shareLocalKeys(brainUrl, authFile, { fetch = globalThis.fetch, log = () => {} } = {}) {
+	let local;
+	try {
+		local = JSON.parse(fs.readFileSync(authFile, "utf-8"));
+	} catch {
+		return [];
+	}
+	if (!local || typeof local !== "object") return [];
+	const res = await fetch(`${brainUrl}/api/keys`);
+	if (!res.ok) return [];
+	const present = new Set(((await res.json()).keys ?? []).filter((k) => k.present).map((k) => k.id));
+	const shared = [];
+	for (const [id, value] of Object.entries(local)) {
+		if (typeof value !== "string" || present.has(id)) continue;
+		const put = await fetch(`${brainUrl}/api/keys/${encodeURIComponent(id)}`, {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ value }),
+		});
+		if (put.ok) shared.push(id);
+	}
+	if (shared.length) log(`shared brain: added this device's keys ${shared.join(", ")}`);
+	return shared;
+}
+
 /** Call onReplaced() once the file at `file` changes on disk (an update
  *  swapped the AppImage). Polls; returns a stop function. */
 function watchReplaced(file, onReplaced, everyMs = 60_000) {
@@ -184,4 +212,4 @@ function watchReplaced(file, onReplaced, everyMs = 60_000) {
 	return () => clearInterval(t);
 }
 
-module.exports = { isTailnetUrl, peerUrls, rememberedBrain, rememberBrain, findTailnetBrain, DEFAULT_PORT, serveFile, servePort, writeServeUrl, clearServeUrl, readServeUrl, isUp, attachableServer, watchReplaced };
+module.exports = { isTailnetUrl, peerUrls, rememberedBrain, rememberBrain, findTailnetBrain, shareLocalKeys, DEFAULT_PORT, serveFile, servePort, writeServeUrl, clearServeUrl, readServeUrl, isUp, attachableServer, watchReplaced };

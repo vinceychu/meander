@@ -19,16 +19,25 @@ import path from "node:path";
 import { AUTH_FILE } from "../../config.ts";
 import type { AuthStore } from "../core/ports.ts";
 
+/** A second copy of the keys beside auth.json: if auth.json ever goes
+ *  missing or corrupt (a bad hand-edit, a half-finished copy), the keys
+ *  come back from here instead of looking like "no keys yet". */
+const BACKUP_FILE = () => path.join(path.dirname(AUTH_FILE), "auth.backup.json");
+
 /** The flat string→string map, or {} for absent/corrupt/non-object. */
 function readMap(): Record<string, string> {
+	return readFile(AUTH_FILE) ?? readFile(BACKUP_FILE()) ?? {};
+}
+
+function readFile(file: string): Record<string, string> | null {
 	try {
-		const raw = JSON.parse(fs.readFileSync(AUTH_FILE, "utf-8"));
-		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+		const raw = JSON.parse(fs.readFileSync(file, "utf-8"));
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
 		return Object.fromEntries(
 			Object.entries(raw).filter(([, v]) => typeof v === "string") as [string, string][],
 		);
 	} catch {
-		return {}; // absent or corrupt — the documented state is "no keys yet"
+		return null; // absent or corrupt
 	}
 }
 
@@ -37,12 +46,21 @@ function readMap(): Record<string, string> {
  *  tmp-in-same-dir + rename keeps the swap atomic; chmod BEFORE the
  *  rename so the mode never exists relaxed on the final path. */
 function writeMap(map: Record<string, string>): void {
-	const dir = path.dirname(AUTH_FILE);
+	writeFile(AUTH_FILE, map);
+	try {
+		writeFile(BACKUP_FILE(), map);
+	} catch {
+		/* the backup is best effort; auth.json is already saved */
+	}
+}
+
+function writeFile(file: string, map: Record<string, string>): void {
+	const dir = path.dirname(file);
 	fs.mkdirSync(dir, { recursive: true });
-	const tmp = path.join(dir, `.auth.json.tmp-${process.pid}`);
+	const tmp = path.join(dir, `.${path.basename(file)}.tmp-${process.pid}`);
 	fs.writeFileSync(tmp, `${JSON.stringify(map, null, "\t")}\n`, { mode: 0o600 });
 	fs.chmodSync(tmp, 0o600); // umask may have relaxed the create mode
-	fs.renameSync(tmp, AUTH_FILE);
+	fs.renameSync(tmp, file);
 }
 
 export const authStore: AuthStore = {

@@ -206,6 +206,15 @@ export function providerKeyPresent(provider: string): boolean {
 	return info ? keyValue(info.envVar) !== undefined : true;
 }
 
+/** A key pasted twice in a row ("abcabc") is the one key: a double paste
+ *  into the field is the common slip, and the provider rejects it. */
+export function undoubledPaste(value: string): string {
+	const half = value.length / 2;
+	const once = value.slice(0, half);
+	// Distinct characters: a real key is random; "dddd…" is not a double paste.
+	return half >= 12 && Number.isInteger(half) && new Set(once).size >= 8 && once === value.slice(half) ? once : value;
+}
+
 /**
  * Save one key (PUT). Shape gate first (owner decision: bad pastes are
  * 400s, never stored), then the file write, then the env reflection. A
@@ -215,7 +224,7 @@ export function providerKeyPresent(provider: string): boolean {
 export function saveKey(id: string, value: string): { ok: true; status: AuthKeyStatus } | { ok: false; error: string } {
 	const shape = isProviderEnvVar(id) ? genericProviderKeyGuard(id, value) : validateKeyShape(id, value);
 	if (!shape.ok) return { ok: false, error: shape.error };
-	const trimmed = value.trim();
+	const trimmed = undoubledPaste(value.trim());
 	authStore.setAuthVar(id, trimmed);
 	const record = boot();
 	if (!record.realEnv.has(id)) {
