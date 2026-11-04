@@ -43,6 +43,30 @@ rm -f .git/MERGE_HEAD .git/MERGE_MODE
 sed -i "s/^commit=.*/commit=$TIP/" .upstream-sync
 git add .upstream-sync
 
+# Conflicts that happen on every sync and have one right answer:
+# - package.json: Meander's own version/name/author/homepage lines win.
+# - package-lock.json: regenerate from the merged package.json.
+if git diff --name-only --diff-filter=U | grep -qx package.json; then
+	python3 - <<'PY'
+import re
+p = "package.json"
+s = open(p).read()
+pat = re.compile(r"<<<<<<< [^\n]*\n(.*?)=======\n(.*?)>>>>>>> [^\n]*\n", re.S)
+meta = re.compile(r'^\s*"(version|name|homepage|desktopName|description)"\s*:|^\s*"(name|email)"\s*:', re.M)
+def keep_ours(m):
+	ours, theirs = m.group(1), m.group(2)
+	lines = [l for l in (ours + theirs).splitlines() if l.strip()]
+	return ours if all(meta.search(l) for l in lines) else m.group(0)
+open(p, "w").write(pat.sub(keep_ours, s))
+PY
+	grep -q '^<<<<<<< ' package.json || git add package.json
+fi
+if git diff --name-only --diff-filter=U | grep -qx package-lock.json && ! grep -q '^<<<<<<< ' package.json; then
+	git checkout --theirs package-lock.json
+	npm install --package-lock-only --ignore-scripts --no-audit --no-fund >/dev/null
+	git add package-lock.json
+fi
+
 echo
 echo "Merged $PENDING upstream commit(s) up to $TIP into the working tree."
 echo "Conflicted files (resolve, then: git add -A && npm run typecheck && npm test && git commit):"

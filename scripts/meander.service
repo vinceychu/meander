@@ -8,9 +8,17 @@ After=network-online.target
 # No libfuse2 on newer Ubuntu: unpack to /tmp and run (still auto-updates;
 # the updater reads $APPIMAGE, which the runtime sets).
 Environment=APPIMAGE_EXTRACT_AND_RUN=1
+# A server orphaned by a hard kill would hold the port forever and block
+# every update; free it first (scripts/meander-reclaim-port.sh).
+ExecStartPre=-%h/.local/share/meander/meander-reclaim-port.sh 8710
 ExecStart=%h/Applications/LearnHarness.AppImage --serve --port=8710 --ozone-platform=headless --disable-gpu
 Restart=always
 RestartSec=5
+# If something else legitimately holds the port, serve mode exits 0 at
+# once; don't spin, retry every few minutes instead.
+StartLimitIntervalSec=0
+RestartSteps=5
+RestartMaxDelaySec=300
 
 [Install]
 WantedBy=default.target

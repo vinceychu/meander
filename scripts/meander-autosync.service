@@ -1,0 +1,9 @@
+[Unit]
+Description=Meander: merge new LearnHarness updates, test, release (scripts/auto-upstream.sh)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/projects/meander-autosync-runner/scripts/auto-upstream.sh
+Nice=19
+TimeoutStartSec=4h

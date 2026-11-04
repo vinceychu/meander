@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Meander upstream sync
+
+[Timer]
+OnCalendar=*-*-* 04:23
+RandomizedDelaySec=20m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -7,6 +7,8 @@ here="$(cd "$(dirname "$0")" && pwd)"
 
 mkdir -p ~/.config/systemd/user
 cp "$here/meander.service" ~/.config/systemd/user/meander.service
+mkdir -p ~/.local/share/meander
+install -m 755 "$here/meander-reclaim-port.sh" ~/.local/share/meander/meander-reclaim-port.sh
 systemctl --user daemon-reload
 systemctl --user enable --now meander.service
 # Keep it running when you're not logged in to the desktop.
