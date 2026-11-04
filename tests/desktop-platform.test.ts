@@ -96,7 +96,7 @@ describe("desktop window chrome", () => {
 		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), context);
 		assert.equal(bridge.platform, "win32");
 		assert.deepEqual(Object.keys(bridge).sort(), [
-			"chatgpt", "checkForUpdates", "expandWindow", "getUpdateState", "getZoom", "installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "subscriptions",
+			"chatgpt", "checkForUpdates", "chooseAttachmentFolder", "expandWindow", "getPathForFile", "getUpdateState", "getZoom", "installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "subscriptions",
 		]);
 		assert.deepEqual(Object.keys(bridge.subscriptions as object).sort(), ["cancel", "consent", "disconnect", "login", "onChange", "open", "respond", "retry", "status"]);
 	});
@@ -177,9 +177,14 @@ describe("Meander release workflow", () => {
 	const yaml = require("js-yaml") as { load(source: string): Workflow };
 	const wf = yaml.load(readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"));
 
-	it("is the only workflow, triggered by version tags", () => {
-		assert.deepEqual(readdirSync(new URL("../.github/workflows/", import.meta.url)), ["release.yml"]);
+	it("is the only releasing workflow, triggered by version tags", () => {
+		assert.deepEqual(readdirSync(new URL("../.github/workflows/", import.meta.url)), ["release.yml", "upstream-check.yml"]);
 		assert.deepEqual(wf.on.push.tags, ["v*"]);
+		// The upstream check only reads and files an issue: no push trigger, no write to contents.
+		const check = readFileSync(new URL("../.github/workflows/upstream-check.yml", import.meta.url), "utf8");
+		const parsed = yaml.load(check) as unknown as { on: Record<string, unknown>; permissions: Record<string, string> };
+		assert.deepEqual(Object.keys(parsed.on).sort(), ["schedule", "workflow_dispatch"]);
+		assert.equal(parsed.permissions.contents, "read");
 	});
 	it("gates → one draft → both platforms → publish, in order", () => {
 		assert.equal(wf.jobs.draft?.needs, "gates");

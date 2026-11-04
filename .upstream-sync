@@ -1,0 +1,5 @@
+# Last LearnHarness commit merged into Meander. scripts/sync-upstream.sh
+# uses it as the merge base and rewrites it after a sync.
+repo=https://github.com/amosblomqvist/learnharness
+branch=main
+commit=713377f366771e3e4730e6acd1bc290e0ebc6d6e

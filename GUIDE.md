@@ -237,6 +237,25 @@ Like spaced review, nothing is stored: it's all computed from your sessions and 
 
 ---
 
+## 10. Staying current with LearnHarness
+
+Meander is built on LearnHarness (https://github.com/amosblomqvist/learnharness) and now merges its updates instead of drifting from it. `.upstream-sync` records the last upstream commit merged.
+
+- **Check:** `scripts/sync-upstream.sh --check` lists upstream commits not yet in Meander. A weekly GitHub Action (`.github/workflows/upstream-check.yml`) opens or updates an `upstream-sync` issue when there are any.
+- **Merge:** `scripts/sync-upstream.sh` merges them into the working tree as one commit's worth of changes (none of upstream's history enters Meander's). Resolve conflicts, run `npm run typecheck && npm test`, commit, then publish as usual.
+
+**New in 0.5.8** (upstream LearnHarness 0.3.9 → 0.5.0, merged 2026-11-04):
+
+- **Attach files and folders:** paperclip or drag-and-drop in the composer; the message carries the path and the agent reads it in place. Optional folder restrictions for what the agent may read.
+- **Your images in the lesson:** the agent can show your photos and mark them up with arrows and labels; models see images.
+- **More models:** custom and local OpenAI-compatible endpoints, native Claude Code (opt-in, uses your Claude Code login), slot-scoped prompt-cache preferences.
+- **Web search providers:** Exa, Firecrawl, hosted Ollama and more, chosen in Settings.
+- **Notes import:** PDF notes, whole folders with source organization and safe source deletion, hidden files skipped; clearer "Extract files" controls on the graph.
+- **Practice:** Practice prompt overrides in Settings, pending-problem status, practice sources hidden from the graph.
+- **Reliability:** crash-safe (atomic) writes for every store file, recovery for interrupted questions and malformed tool calls, event-replay de-duplication, a guard against swallowed teaching prose on the Anthropic API, local chat drafts, observed cache-hit stats, non-ASCII keyboard shortcuts, Next 16.4.
+
+---
+
 ## How the app is built (a reading map)
 
 Read in this order:

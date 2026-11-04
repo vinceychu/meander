@@ -29,6 +29,7 @@ const dataLocation = require("./data-location.cjs");
 const macSelfUpdate = require("./mac-self-update.cjs");
 const linuxDesktopEntry = require("./linux-desktop-entry.cjs");
 const serveMode = require("./serve-mode.cjs");
+const { pickAttachmentPath } = require("./attachment-picker.cjs");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
@@ -1140,6 +1141,10 @@ async function main() {
 		if (!external || !trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted development request.");
 		await openWebSubscriptionBrowser(action, new URL(url).origin, { openExternal: (target) => shell.openExternal(target) });
 	});
+
+	ipcMain.handle("lh:attachment:pick", (event, mode) => pickAttachmentPath(event, mode, {
+		BrowserWindow, dialog, trustedAppWindows, origin: new URL(url).origin,
+	}));
 
 	installMenu();
 	if (process.platform === "darwin" && app.isPackaged) {
