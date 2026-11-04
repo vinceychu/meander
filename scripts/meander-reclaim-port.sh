@@ -12,7 +12,9 @@ port="${1:-8710}"
 for pid in $(ss -Hltnp "sport = :$port" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
 	comm=$(cat "/proc/$pid/comm" 2>/dev/null) || continue
 	case "$comm" in next-server*) ;; *) continue ;; esac
-	ppid=$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null) || continue
+	# /proc/PID/status, not stat: the comm ("next-server (v16.x)") has spaces.
+	ppid=$(awk '/^PPid:/{print $2}' "/proc/$pid/status" 2>/dev/null)
+	[ -n "$ppid" ] || continue
 	pcmd=$(tr '\0' ' ' < "/proc/$ppid/cmdline" 2>/dev/null)
 	case "$pcmd" in *LearnHarness*|*Meander*|*learnharness*|*meander*) continue ;; esac
 	echo "meander-reclaim-port: killing orphaned next-server $pid on :$port (parent $ppid: ${pcmd:-gone})"
