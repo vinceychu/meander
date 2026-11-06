@@ -7,6 +7,7 @@ import { ActivityProvider } from "@/components/activity-dock";
 import { ServerEventsProvider } from "@/components/server-events";
 import { AppearanceProvider } from "@/components/settings/appearance";
 import UpdateBanner from "@/components/update-banner";
+import { ThemeProvider, THEME_BOOT_SCRIPT } from "@/components/theme";
 
 // Chrome = JetBrains Mono, teaching prose = Source Sans 3, titles = CMU
 // Serif (the bundled lh-cmu @font-face in globals.css — no CDN).
@@ -24,8 +25,13 @@ export const viewport: Viewport = { themeColor: "#141818" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
 	return (
-		<html lang="en" className={`dark ${ui.variable} ${prose.variable}`}>
+		<html lang="en" className={`dark ${ui.variable} ${prose.variable}`} suppressHydrationWarning>
+			<head>
+				{/* Light/dark (2026-11-06): set the class before first paint. */}
+				<script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+			</head>
 			<body className="min-h-dvh antialiased">
+			<ThemeProvider>
 			{/* The notification channel rides OUTSIDE everything: sidebar, dock,
 				 and pages all subscribe as the polls retire (push S3, 2026-10-02). */}
 			<ServerEventsProvider>
@@ -39,6 +45,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 			</ServerEventsProvider>
 			{/* Auto-update banner (Wave C): fixed card, Electron-only pushes. */}
 			<UpdateBanner />
+			</ThemeProvider>
 		</body>
 		</html>
 	);

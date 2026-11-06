@@ -6,10 +6,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode } from "@/src/core";
-import { BarChart3Icon, DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { BarChart3Icon, DumbbellIcon, NotebookPenIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
+import { ThemeToggle } from "@/components/theme";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
 import { FindEverything } from "@/components/find-everything";
@@ -887,6 +888,18 @@ function SessionsSidebar() {
 					    New session — quiet, bottom-pinned, opens the centered
 					    dialog (also mod+, in the keyboard registry). */}
 					<div className="flex items-center gap-1 px-3 pb-3 pt-1">
+						{/* Notes (2026-11-06): the Markdown vault (Obsidian-style). */}
+						<Link
+							href="/notes"
+							data-testid="notes-entry"
+							className={cn(
+								"flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+								pathname?.startsWith("/notes") && "bg-accent text-foreground",
+							)}
+						>
+							<NotebookPenIcon className="size-3" />
+							Notes
+						</Link>
 						{/* Study stats (fork, 2026-10-27): same row language as Settings. */}
 						<Link
 							href="/stats"
@@ -907,6 +920,7 @@ function SessionsSidebar() {
 								Settings
 							</button>
 						</Hint>
+						<ThemeToggle className="ml-auto" />
 					</div>
 				</div>
 

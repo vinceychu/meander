@@ -11,6 +11,8 @@
 7. **Study stats**: streak, study time, retention, review forecast
 8. **Sandboxed CLI tools** (tools run with no network and read-only files by default)
 9. **Automatic updates** from your own GitHub repo, on Linux and Mac
+10. **Notes**: an Obsidian-style Markdown vault (links, backlinks, graph, Bases), wired into lessons and practice
+11. **Day / night mode**
 
 **About the name:** everything you see says Meander. A few hidden internal labels keep the old name on purpose: the data folder (`~/.config/LearnHarness`, `~/Library/Application Support/LearnHarness`), the `learnharness` command, and the app id. Renaming those would orphan your data and settings. 
 
@@ -46,6 +48,38 @@ It builds for the Mac you run it on (Apple Silicon or Intel). Open the `.dmg` in
 ### First run (each device)
 
 Add a provider API key and pick models (Anthropic, OpenAI, OpenRouter, …). Keys are stored **per device** in the app's private folder and never sync.
+
+---
+
+## Notes (Obsidian-style vault)
+
+**Sidebar → Notes** (or `/notes`). Notes are plain `.md` files in `<data folder>/notes`, so they sync with everything else. **⚙ (bottom of the file list) → Vault** can point Meander at any folder instead, including an existing Obsidian vault. Its `.obsidian` folder is left alone.
+
+**Writing**
+- Three modes per tab: **Live Preview** (Markdown hides except on the line you're on), **Source**, **Reading** (⌘E toggles reading).
+- `[[` links a note (then `#` for a heading, `|` for an alias), `#` adds a tag, `![[file]]` embeds an image or another note. Clicking a rendered link opens it; ⌘-click opens in a new tab. A link to a note that doesn't exist creates it.
+- Paste or drop images/PDFs to attach them (saved to `attachments/`). Paste a URL over selected text to make a link. Size images with `![[pic.png|300]]`, and click any image for the full-screen viewer.
+- ⌘B bold · ⌘I italic · ⌘K link · ⌘⇧H highlight · ⌘L / ⌘↵ checkbox · ⌥↑/↓ move line · ⌘F find in note. `==highlight==` and colored `=={red}highlight==` (red, orange, yellow, green, blue, purple, pink). Callouts are `> [!tip] Title`, and `> [!faq]-` makes a folded one. `%%comments%%` hide in reading view.
+- **Properties** (YAML frontmatter) edit as fields at the top of the note. `tags` and `aliases` work like in Obsidian.
+
+**Finding things**
+- ⌘O quick switcher (⇧↵ creates), ⌘P command palette, ⌘⇧F search with operators: `tag:#x`, `path:folder`, `file:name`, `"exact phrase"`, `-exclude`, `[status:done]`, `task-todo:`, `/regex/`.
+- The right panel shows **backlinks** (with the linking line) and **unlinked mentions** (one click links them), plus outgoing links, the outline, and the local graph. ⌘G opens the **global graph**, with filters for tags, unresolved links, attachments, orphans and depth.
+- Tags pane (nested `#a/b`), bookmarks, and recent files.
+
+**Bases** (database icon): table, cards and kanban views over note properties. They support filters (all/any, per view and base-wide), sorting, group-by with group order and hiding, a result search, a row limit, and computed formula columns (`if()`, `days()`, `len()`, …). Click a cell to edit that note's property. Drag a kanban card to change its `status` (or whatever you group by). Saved as a `.base` file (JSON, which is also valid YAML).
+
+**Daily notes and templates:** ⌘⇧D opens today's note in `Daily/`. Notes in `Templates/` can be inserted, with `{{title}} {{date}} {{time}} {{date:YYYY-MM-DD}}`. A template named `Daily` seeds new daily notes. **⚙ → Default file to open** can be the last files, the daily note, a new note, or a specific note.
+
+**The Meander part:** ⋯ → **Teach me this** starts a lesson on the note, **Practice this** starts problems on it, and **Add to knowledge graph** extracts its propositions into your graph.
+
+**Safety:** saves are automatic and atomic. If another device or app changed the file meanwhile, you get "Load the disk version" or "Keep mine". Nothing is overwritten silently. Clean tabs reload when the file changes on disk. Deleting moves files to `.trash/` in the vault, and Meander offers to delete attachments that only that note used.
+
+**Code:** `src/core/notes.ts` (parsing, links, search, Bases; pure, start here), `src/store/notes.ts` (files), `src/server/notes.ts` (index, rename with link rewriting), `app/api/notes/*`, `components/notes/*`.
+
+## Day / night mode
+
+The sun/moon button at the bottom of the sidebar (also in Notes) flips between night and day. **Settings → Appearance → Mode** also offers *Match system*. The choice is per device. A custom background color applies in night mode only.
 
 ---
 

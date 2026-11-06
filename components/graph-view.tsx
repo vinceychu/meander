@@ -1,4 +1,5 @@
 "use client";
+import { useTheme } from "@/components/theme";
 
 /**
  * The home knowledge-graph view (W4; vision §1 "Rendering (DECIDED)").
@@ -942,6 +943,7 @@ export function GraphView({
 }) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
+	const { resolved: themeMode } = useTheme();
 	const cardRef = useRef<HTMLDivElement | null>(null);
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
 	const [selected, setSelected] = useState<Selection | null>(null);
@@ -1420,7 +1422,7 @@ export function GraphView({
 			// Match the app typography (Geist via the body's stack).
 			fontFamily: getComputedStyle(document.body).fontFamily,
 		});
-	}, [snapshot, isEmpty]);
+	}, [snapshot, isEmpty, themeMode]);
 
 	// Feed #2 — settings: just marks the frame dirty. No rebuild, no
 	// re-layout, no camera touch (the whole point of the new renderer).

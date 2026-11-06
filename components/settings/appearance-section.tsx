@@ -41,6 +41,7 @@ import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
 import { useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
+import { useTheme, type ThemeMode } from "@/components/theme";
 import { CommitInput, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
 
 /** The factory reading family — the DEFAULT row's identity (unset =
@@ -97,6 +98,7 @@ export function AppearanceSection({
 	/** PUT the whole appearance section; the page re-applies on success. */
 	onSectionChange: (next: AppearanceSettings) => void;
 }) {
+	const theme = useTheme();
 	const { appearance: resolved } = useAppearance();
 	const md = appearance?.mdRendering;
 
@@ -186,9 +188,11 @@ export function AppearanceSection({
 
 	return (
 		<>
-			<SettingsRow label="Mode" hint="Coming soon" testid="row-mode" dimmed>
-				<ThinSelect value="dark" ariaLabel="mode" onChange={() => {}} testid="select-mode" disabled>
-					<option value="dark">Dark</option>
+			<SettingsRow label="Mode" hint="This device" testid="row-mode">
+				<ThinSelect value={theme.mode} ariaLabel="mode" onChange={(v) => theme.setMode(v as ThemeMode)} testid="select-mode">
+					<option value="dark">Night</option>
+					<option value="light">Day</option>
+					<option value="system">Match system</option>
 				</ThinSelect>
 			</SettingsRow>
 			<SettingsRow
