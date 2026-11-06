@@ -21,6 +21,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { FACTORY_SETTINGS, type AppearanceSettings } from "@/src/core";
+import { useTheme } from "@/components/theme";
 
 /** The resolved, fully-concrete appearance view (delta + factory merged). */
 export function resolveAppearance(delta: AppearanceSettings | undefined) {
@@ -128,7 +129,13 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
 	const appliedRef = useRef<string>("");
 
 	// The vars apply on every change — stringified as the change signal.
-	const vars = useMemo(() => appearanceVars(resolveAppearance(delta)), [delta]);
+	// A custom background is derived on the dark curve, so it applies in
+	// night mode only; day mode keeps the stylesheet's paper palette.
+	const { resolved: themeMode } = useTheme();
+	const vars = useMemo(() => {
+		const a = resolveAppearance(delta);
+		return appearanceVars(themeMode === "dark" ? a : { ...a, background: null });
+	}, [delta, themeMode]);
 	const key = useMemo(() => JSON.stringify(vars), [vars]);
 	// REMOVAL is half the job (owner repro, fix wave): a later write that
 	// OMITS a var (empty field = factory, serif toggle back on) must clear

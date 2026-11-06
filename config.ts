@@ -33,6 +33,11 @@ export const PATHS = {
 	 *  per tool, attachable to practice sessions (src/server/cli-tools.ts).
 	 *  Lives in the data dir, so it syncs across devices with everything else. */
 	tools: path.join(DATA_ROOT, "tools"),
+	/** The default notes vault (2026-11-06): plain Markdown files, Obsidian
+	 *  compatible; syncs with the data folder. notes-vault.json can point the
+	 *  app at another folder (e.g. an existing Obsidian vault). */
+	notes: path.join(DATA_ROOT, "notes"),
+	notesVaultConfig: path.join(DATA_ROOT, "notes-vault.json"),
 } as const;
 
 // ─── Models ────────────────────────────────────────────────────────────────

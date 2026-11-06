@@ -1,6 +1,7 @@
-// Meander's mark (2026-10-28): three tapered waterfall strands that arch
-// over and fall, side by side, so together they read as an "m". Writes the
-// strand paths into build/icon-meander.svg (the app icon source) and
+// Meander's mark (2026-11-06): one monoline river that flows in from the
+// left, bends ∩ ∪ ∩ (a meander), and flows out to the right; together the
+// bends read as a lowercase "m". The ends fade out like water leaving the
+// frame. Writes build/icon-meander.svg (the app icon source) and
 // components/lh-mark.tsx (the in-app logo). Then run make-icons.mjs.
 //   node scripts/make-mark.mjs [out.svg]   (optional: preview only)
 import { readFileSync, writeFileSync } from "node:fs";
@@ -9,90 +10,65 @@ import { fileURLToPath } from "node:url";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-// Geometry in the 1024 icon canvas. Stems are where each strand falls.
-const STEMS = [330, 530, 730];
-const TOP = 330; // arch centre line
-const BOTTOM = 790; // where the falls end
-const W = 66; // full strand width
-const LIP = 70; // first strand's arch radius (the ledge it spills over)
-const GAP = 26; // space between a stem and the next strand's start
+// Geometry in the 1024 icon canvas.
+const SW = 60; // stroke width
+const R1 = 100; // the two upper bends
+const R2 = 64; // the lower bend between them
+const TOP = 450; // upper bend centre line
+const BOT = 620; // lower bend centre line
+const BASE = 700; // where the outer stems start curving out
+const TAIL = 70; // inflow/outflow curve length
 
-/** Centre line of one strand: a half-circle from a to b, then straight down. */
-function centreLine(a, b) {
-	const r = (b - a) / 2;
-	const cx = a + r;
-	const pts = [];
-	for (let i = 0; i <= 48; i++) {
-		const t = Math.PI - (Math.PI * i) / 48;
-		pts.push([cx + r * Math.cos(t), TOP - r * Math.sin(t)]);
-	}
-	for (let i = 1; i <= 60; i++) pts.push([b, TOP + ((BOTTOM - TOP) * i) / 60]);
-	return pts;
-}
+const W = 4 * R1 + 2 * R2 + 2 * TAIL;
+const a = 512 - W / 2 + TAIL;
+const b = a + 2 * R1;
+const c = b + 2 * R2;
+const d = c + 2 * R1;
+const D = [
+	`M${a - TAIL} ${BASE + TAIL}`,
+	`Q${a} ${BASE + TAIL} ${a} ${BASE}`,
+	`L${a} ${TOP}`,
+	`A${R1} ${R1} 0 0 1 ${b} ${TOP}`,
+	`L${b} ${BOT}`,
+	`A${R2} ${R2} 0 0 0 ${c} ${BOT}`,
+	`L${c} ${TOP}`,
+	`A${R1} ${R1} 0 0 1 ${d} ${TOP}`,
+	`L${d} ${BASE}`,
+	`Q${d} ${BASE + TAIL} ${d + TAIL} ${BASE + TAIL}`,
+].join(" ");
 
-/** Fill outline of a centre line: pointed start, full width over the arch,
- *  tapering to a fine point at the bottom of the fall. */
-function strand(pts) {
-	const len = [0];
-	for (let i = 1; i < pts.length; i++) len.push(len[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
-	const L = len.at(-1);
-	const width = (s) => {
-		const u = s / L;
-		const grow = 0.4 + 0.6 * Math.min(1, u / 0.12) ** 0.6;
-		const fall = u < 0.5 ? 1 : 1 - 0.88 * ((u - 0.5) / 0.5) ** 1.6;
-		return Math.max(W * grow * fall, 1.5);
-	};
-	const left = [];
-	const right = [];
-	pts.forEach(([x, y], i) => {
-		const [x0, y0] = pts[Math.max(0, i - 1)];
-		const [x1, y1] = pts[Math.min(pts.length - 1, i + 1)];
-		const d = Math.hypot(x1 - x0, y1 - y0) || 1;
-		const nx = -(y1 - y0) / d;
-		const ny = (x1 - x0) / d;
-		const h = width(len[i]) / 2;
-		left.push([x + nx * h, y + ny * h]);
-		right.push([x - nx * h, y - ny * h]);
-	});
-	const ring = [...left, ...right.reverse()];
-	return "M" + ring.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join(" L") + " Z";
-}
-
-const strands = [
-	centreLine(STEMS[0] - 2 * LIP, STEMS[0]),
-	centreLine(STEMS[0] + W / 2 + GAP, STEMS[1]),
-	centreLine(STEMS[1] + W / 2 + GAP, STEMS[2]),
-].map(strand);
-
-// Centre the mark's bounding box in the canvas.
-const xs = [STEMS[0] - 2 * LIP - W / 2, STEMS[2] + W / 2];
-const ys = [TOP - (STEMS[1] - STEMS[0] - W / 2 - GAP) / 2 - W / 2, BOTTOM];
-const dx = (512 - (xs[0] + xs[1]) / 2).toFixed(1);
-const dy = (512 - (ys[0] + ys[1]) / 2).toFixed(1);
-const paths = (indent) => strands.map((d) => `${indent}<path d="${d}"/>`).join("\n");
-const vb = (() => {
-	const pad = 24;
-	const x = xs[0] + Number(dx) - pad;
-	const y = ys[0] + Number(dy) - pad;
-	const s = Math.max(xs[1] - xs[0], ys[1] - ys[0]) + 2 * pad;
-	return [x - (s - (xs[1] - xs[0]) - 2 * pad) / 2, y - (s - (ys[1] - ys[0]) - 2 * pad) / 2, s, s].map((n) => n.toFixed(1)).join(" ");
-})();
+// Mark bounds (stroke included) for the in-app viewBox.
+const pad = SW / 2 + 6;
+const x0 = a - TAIL - pad;
+const x1 = d + TAIL + pad;
+const y0 = TOP - R1 - pad;
+const y1 = BASE + TAIL + pad;
+const side = Math.max(x1 - x0, y1 - y0);
+const vb = [(x0 + x1) / 2 - side / 2, (y0 + y1) / 2 - side / 2, side, side].map((n) => n.toFixed(1)).join(" ");
 
 const iconPath = path.join(root, "build", "icon-meander.svg");
-const icon = readFileSync(iconPath, "utf8");
-const clip = icon.match(/<clipPath id="sq">[\s\S]*?<\/clipPath>/)[0];
+const clip = readFileSync(iconPath, "utf8").match(/<clipPath id="sq">[\s\S]*?<\/clipPath>/)[0];
 const svg = `<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <!-- Meander app icon (2026-10-28): three tapered waterfall strands that
-       arch over and fall, reading as an "m". White on flat near-black.
+  <!-- Meander app icon (2026-11-06): one river bending ∩ ∪ ∩ into an "m",
+       fading in and out at the edges. Pale water on deep teal.
        Generated by scripts/make-mark.mjs; squircle from build/icon-flat.svg. -->
   <defs>
     ${clip}
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#20403f"/>
+      <stop offset="1" stop-color="#0c1718"/>
+    </linearGradient>
+    <linearGradient id="ink" gradientUnits="userSpaceOnUse" x1="${a - TAIL - SW / 2}" y1="0" x2="${d + TAIL + SW / 2}" y2="0">
+      <stop offset="0" stop-color="#7cc4b4" stop-opacity="0"/>
+      <stop offset="0.14" stop-color="#9fd8c9"/>
+      <stop offset="0.5" stop-color="#f6f1e6"/>
+      <stop offset="0.86" stop-color="#9fd8c9"/>
+      <stop offset="1" stop-color="#7cc4b4" stop-opacity="0"/>
+    </linearGradient>
   </defs>
   <g clip-path="url(#sq)">
-    <rect width="1024" height="1024" fill="#141818"/>
-    <g fill="#FFFFFF" transform="translate(${dx} ${dy})">
-${paths("      ")}
-    </g>
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <path d="${D}" fill="none" stroke="url(#ink)" stroke-width="${SW}" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
 </svg>
 `;
@@ -103,19 +79,36 @@ if (process.argv[2]) {
 	writeFileSync(iconPath, svg);
 	writeFileSync(
 		path.join(root, "components", "lh-mark.tsx"),
-		`/**
- * The app mark (2026-10-28): Meander's waterfall — three tapered strands
- * that arch over and fall, reading as an "m". Same geometry as the app icon
- * (build/icon-meander.svg, both generated by scripts/make-mark.mjs), without
- * its tile, so it sits directly on the UI's background. Uses currentColor;
+		`"use client";
+/**
+ * The app mark (2026-11-06): one river bending ∩ ∪ ∩ into an "m", fading in
+ * and out at its ends. Same geometry as the app icon (build/icon-meander.svg,
+ * both generated by scripts/make-mark.mjs), without its tile, so it sits
+ * directly on the UI's background in light and dark. Uses currentColor;
  * sizing is the consumer's job.
  */
+import { useId } from "react";
+
 export function LhMark({ className = "" }: { className?: string }) {
+	const id = useId().replace(/:/g, "");
 	return (
 		<svg viewBox="${vb}" className={\`text-foreground \${className}\`} aria-hidden="true">
-			<g fill="currentColor" transform="translate(${dx} ${dy})">
-${paths("\t\t\t\t")}
-			</g>
+			<defs>
+				<linearGradient id={\`lhm\${id}\`} gradientUnits="userSpaceOnUse" x1="${a - TAIL - SW / 2}" y1="0" x2="${d + TAIL + SW / 2}" y2="0">
+					<stop offset="0" stopColor="currentColor" stopOpacity="0" />
+					<stop offset="0.16" stopColor="currentColor" />
+					<stop offset="0.84" stopColor="currentColor" />
+					<stop offset="1" stopColor="currentColor" stopOpacity="0" />
+				</linearGradient>
+			</defs>
+			<path
+				d="${D}"
+				fill="none"
+				stroke={\`url(#lhm\${id})\`}
+				strokeWidth="${SW}"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			/>
 		</svg>
 	);
 }

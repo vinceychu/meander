@@ -95,3 +95,5 @@ export * from "./review.ts";
 // Study stats + Anki export (fork, 2026-10-27): more derived views.
 export * from "./study-stats.ts";
 export * from "./anki.ts";
+// Notes vault (2026-11-06): namespaced — its small path helpers would clash.
+export * as Notes from "./notes.ts";

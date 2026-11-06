@@ -30,46 +30,54 @@
 /* Palette (owner's hexes): main #141414, raised #1C1C1C, edges #434343.
    Mono chrome = JetBrains Mono; prose = Source Sans 3; titles = CMU Serif. */
 :root {
-	color-scheme: dark;
+	color-scheme: light;
 	--radius: 8px;
-	--background: #141414;
-	--foreground: #e6e6e6;
-	--card: #1c1c1c;
-	--card-foreground: #e6e6e6;
-	--popover: #1c1c1c;
-	--popover-foreground: #e6e6e6;
-	--primary: #e6e6e6;
-	--primary-foreground: #141414;
-	--secondary: #1c1c1c;
-	--secondary-foreground: #e6e6e6;
-	--muted: #1c1c1c;
-	--muted-foreground: #8d8d8d;
-	--accent: #2a2a2a;
-	--accent-foreground: #e6e6e6;
-	--destructive: oklch(0.704 0.191 22.216);
-	--border: #434343;
-	--input: #434343;
-	--ring: #8d8d8d;
-	/* Emphasis inks default to the REGULAR TEXT COLOR (owner ruling,
-	   appearance wave 2026-09-26 — the old #ee928c/#6fa9d6 factory
-	   emphasis colors are gone). Explicit overrides land via the
-	   appearance settings vars. */
+	/* Day palette (2026-11-06): warm paper, ink text, the same hairline
+	   rhythm as the dark palette (raised surfaces sit a step away from the
+	   page, edges two steps). */
+	--background: #faf9f6;
+	--foreground: #1d1f1e;
+	--card: #f1efea;
+	--card-foreground: #1d1f1e;
+	--popover: #ffffff;
+	--popover-foreground: #1d1f1e;
+	--primary: #1d1f1e;
+	--primary-foreground: #faf9f6;
+	--secondary: #f1efea;
+	--secondary-foreground: #1d1f1e;
+	--muted: #f1efea;
+	--muted-foreground: #6b6e6c;
+	--accent: #e7e4dd;
+	--accent-foreground: #1d1f1e;
+	--destructive: oklch(0.577 0.245 27.325);
+	--border: #d5d1c8;
+	--input: #d5d1c8;
+	--ring: #8a8d8b;
 	--lh-ink-strong: var(--foreground);
 	--lh-ink-italic: var(--foreground);
 	/* THE READING SIZE = the ladder's 16px rung (--text-lg). Can't be
 	   var()-linked: @theme inline inlines literals into utilities without
 	   emitting runtime vars — so this is the one documented duplication:
-	   change one, change both. (owner, typography round 4: snapped from
-	   the reskin's hand-tuned 16.5 to the ladder's 16.) */
+	   change one, change both. */
 	--lh-prose-size: 16px;
 	--lh-prose-leading: 1.5;
 	/* Markdown heading weight (appearance settings; 900 = the Black cut). */
 	--lh-heading-weight: 900;
+	/* Notes accents (links, tags, highlights). */
+	--lh-link: #2f7d6d;
+	--lh-tag: #2f7d6d;
+	--lh-tag-bg: #2f7d6d1a;
+	--lh-mark: #f5e27a99;
 }
 
-/* The app is always dark (<html class="dark">); mirror the same values so
-   the block stays coherent under Tailwind's variant. */
+/* Night palette: <html class="dark"> (the default; the sun/moon switch in
+   the sidebar and Settings → Mode flips it — components/theme.tsx). */
 .dark {
+	color-scheme: dark;
+	--lh-link: #8fd0c1;
+	--lh-tag: #8fd0c1;
+	--lh-tag-bg: #8fd0c11f;
+	--lh-mark: #b8a23a66;
 	--background: #141414;
 	--foreground: #e6e6e6;
 	--card: #1c1c1c;
@@ -602,3 +610,94 @@ body {
 	outline: 1px solid var(--border);
 	border-radius: 0.25rem;
 }
+
+/* ============================================================
+ * NOTES (2026-11-06): the vault editor, Live Preview, reading view,
+ * callouts, tags, highlights. Token-driven, so day/night both work.
+ * ============================================================ */
+.lh-note-editor .cm-editor {
+	background: transparent;
+	color: var(--foreground);
+	font-family: var(--font-prose);
+	font-size: var(--lh-prose-size);
+	line-height: 1.6;
+}
+.lh-note-editor .cm-editor.cm-focused { outline: none; }
+.lh-note-editor .cm-scroller { font-family: inherit; overflow: visible; }
+.lh-note-editor .cm-content { padding: 0 0 2rem; caret-color: var(--foreground); }
+.lh-note-editor .cm-line { padding: 0; }
+.lh-note-editor .cm-activeLine { background: transparent; }
+.lh-note-editor .cm-cursor { border-left-color: var(--foreground); border-left-width: 2px; }
+.lh-note-editor .cm-selectionBackground,
+.lh-note-editor .cm-focused .cm-selectionBackground,
+.lh-note-editor .cm-content ::selection { background: color-mix(in oklab, var(--lh-link) 28%, transparent) !important; }
+.lh-note-editor .cm-placeholder { color: var(--muted-foreground); font-style: italic; }
+.lh-note-editor .cm-md-h1, .lh-note-editor .cm-lp-h1 { font-size: 1.85em; font-weight: 800; line-height: 1.3; }
+.lh-note-editor .cm-md-h2, .lh-note-editor .cm-lp-h2 { font-size: 1.5em; font-weight: 750; line-height: 1.3; }
+.lh-note-editor .cm-md-h3, .lh-note-editor .cm-lp-h3 { font-size: 1.25em; font-weight: 700; }
+.lh-note-editor .cm-md-h4, .lh-note-editor .cm-lp-h4, .lh-note-editor .cm-lp-h5, .lh-note-editor .cm-lp-h6 { font-size: 1.08em; font-weight: 700; }
+.lh-note-editor .cm-lp-heading { padding-top: 0.35em; }
+.lh-note-editor .cm-md-code { font-family: var(--font-mono); font-size: 0.88em; background: var(--muted); border-radius: 4px; padding: 0 3px; }
+.lh-note-editor .cm-lp-codeblock { font-family: var(--font-mono); font-size: 0.88em; background: var(--muted); }
+.lh-note-editor .cm-lp-codeblock .cm-md-code { background: transparent; padding: 0; }
+.lh-note-editor .cm-lp-quote { border-left: 3px solid var(--border); padding-left: 12px !important; color: var(--muted-foreground); }
+.lh-note-editor .cm-lp-callout { border-left: 3px solid var(--lh-callout, var(--lh-link)); padding-left: 12px !important; background: color-mix(in oklab, var(--lh-callout, var(--lh-link)) 9%, transparent); }
+.lh-note-editor .cm-wikilink { color: var(--lh-link); }
+.lh-note-editor .cm-lp-live, .lh-note-editor .cm-lp-link { color: var(--lh-link); cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--lh-link) 40%, transparent); text-underline-offset: 3px; }
+.lh-note-editor .cm-wikilink-unresolved { opacity: 0.65; }
+.lh-note-editor .cm-tag, .lh-note-tag { color: var(--lh-tag); background: var(--lh-tag-bg); border-radius: 999px; padding: 0 6px; font-size: 0.9em; text-decoration: none; }
+.lh-note-editor .cm-lp-mark { background: var(--lh-mark); border-radius: 2px; }
+.lh-note-editor .cm-lp-comment { color: var(--muted-foreground); opacity: 0.7; }
+.lh-note-editor .cm-lp-done { color: var(--muted-foreground); text-decoration: line-through; }
+.lh-note-editor .cm-lp-bullet { display: inline-block; width: 1em; text-align: center; color: var(--muted-foreground); }
+.lh-note-editor .cm-lp-task, .lh-note-task { width: 0.95em; height: 0.95em; margin: 0 0.4em 0 0.1em; vertical-align: -0.12em; accent-color: var(--lh-link); cursor: pointer; }
+.lh-note-editor .cm-lp-hr { display: inline-block; width: 100%; border-top: 1px solid var(--border); vertical-align: middle; }
+.lh-note-editor .cm-lp-image img, .lh-note-img { max-width: 100%; border-radius: 6px; margin: 4px 0; cursor: zoom-in; }
+.lh-note-editor .cm-tooltip { background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font-family: var(--font-ui); font-size: 12px; }
+.lh-note-editor .cm-tooltip-autocomplete ul li[aria-selected] { background: var(--accent); color: var(--foreground); }
+.lh-note-editor .cm-completionDetail { margin-left: 0.6em; opacity: 0.6; font-style: normal; }
+.lh-note-editor .cm-panels { background: var(--card); color: var(--foreground); border-color: var(--border) !important; font-family: var(--font-ui); font-size: 12px; }
+.lh-note-editor .cm-panels input, .lh-note-editor .cm-panels button { background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: 4px; }
+.lh-note-editor .cm-searchMatch { background: var(--lh-mark); }
+.lh-note-editor .cm-selectionMatch { background: color-mix(in oklab, var(--lh-link) 14%, transparent); }
+
+/* Colored highlights (Obsidian 1.14): ==text== and =={color}text== */
+mark, .lh-note-reading mark { background: var(--lh-mark); color: inherit; border-radius: 2px; padding: 0 1px; }
+mark[data-color="red"], .cm-lp-mark-red { background: #e5484d40 !important; }
+mark[data-color="orange"], .cm-lp-mark-orange { background: #f7914040 !important; }
+mark[data-color="yellow"], .cm-lp-mark-yellow { background: #f5d90a55 !important; }
+mark[data-color="green"], .cm-lp-mark-green { background: #46a75840 !important; }
+mark[data-color="blue"], .cm-lp-mark-blue { background: #3e8ef740 !important; }
+mark[data-color="purple"], .cm-lp-mark-purple { background: #8e4ec640 !important; }
+mark[data-color="pink"], .cm-lp-mark-pink { background: #d6409f40 !important; }
+
+.lh-note-link { color: var(--lh-link); text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--lh-link) 40%, transparent); text-underline-offset: 3px; cursor: pointer; }
+.lh-note-link-unresolved { opacity: 0.65; text-decoration-style: dashed; }
+.lh-note-ext { color: var(--lh-link); text-decoration: underline; text-underline-offset: 3px; }
+.lh-note-ext::after { content: " ↗"; font-size: 0.8em; opacity: 0.6; }
+.lh-note-quote { border-left: 3px solid var(--border); padding-left: 1em; color: var(--muted-foreground); margin: 0.8em 0; }
+
+/* Callouts */
+.lh-callout { --lh-callout: var(--lh-link); margin: 0.9em 0; border-radius: 8px; border-left: 3px solid var(--lh-callout); background: color-mix(in oklab, var(--lh-callout) 9%, transparent); padding: 0.6em 0.9em; }
+.lh-callout-title { display: flex; align-items: center; gap: 0.45em; font-weight: 650; color: var(--lh-callout); cursor: default; list-style: none; }
+details.lh-callout > summary { cursor: pointer; }
+details.lh-callout > summary::-webkit-details-marker { display: none; }
+.lh-callout-icon { font-size: 0.95em; }
+.lh-callout-body > :first-child { margin-top: 0.4em; }
+.lh-callout-body > :last-child { margin-bottom: 0; }
+.lh-callout-embed { --lh-callout: var(--border); background: transparent; border: 1px solid var(--border); border-left-width: 3px; }
+.lh-callout-embed .lh-callout-title { font-weight: 500; font-size: 0.9em; }
+.lh-callout-info, .lh-callout-todo, .cm-lp-callout-info, .cm-lp-callout-todo { --lh-callout: #3e8ef7; }
+.lh-callout-tip, .lh-callout-hint, .lh-callout-important, .cm-lp-callout-tip { --lh-callout: #12a594; }
+.lh-callout-success, .lh-callout-check, .lh-callout-done, .cm-lp-callout-success { --lh-callout: #46a758; }
+.lh-callout-question, .lh-callout-help, .lh-callout-faq, .cm-lp-callout-question { --lh-callout: #f76b15; }
+.lh-callout-warning, .lh-callout-caution, .lh-callout-attention, .cm-lp-callout-warning { --lh-callout: #f5a524; }
+.lh-callout-failure, .lh-callout-fail, .lh-callout-missing, .lh-callout-danger, .lh-callout-error, .lh-callout-bug, .cm-lp-callout-danger, .cm-lp-callout-error, .cm-lp-callout-bug { --lh-callout: #e5484d; }
+.lh-callout-example, .cm-lp-callout-example { --lh-callout: #8e4ec6; }
+.lh-callout-quote, .lh-callout-cite, .cm-lp-callout-quote { --lh-callout: var(--muted-foreground); }
+.lh-callout-abstract, .lh-callout-summary, .lh-callout-tldr { --lh-callout: #0091ff; }
+
+.lh-base-table td, .lh-base-table th { border-color: var(--border); }
+.lh-note-reading li:has(> input.lh-note-task), .lh-note-reading li:has(> p > input.lh-note-task) { list-style: none; margin-left: -1.25em; }
+.lh-note-editor .cm-lp-callout-title { font-weight: 650; color: var(--lh-callout, var(--lh-link)); }
+.lh-note-editor .cm-lp-callout .cm-lp-heading, .lh-note-editor .cm-line.cm-lp-callout:first-of-type { font-weight: 600; }
