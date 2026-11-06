@@ -8,7 +8,7 @@
 #      metadata and the lockfile) stop the run: no guessing at code.
 #   4. Gates: typecheck, lint, tests, production build. A test that already
 #      failed on main is not held against the merge; any NEW failure is.
-#   5. Pass: bump the patch version, push main + tag -> GitHub builds the
+#   5. Pass: bump the patch version, push main -> GitHub builds the
 #      release -> this PC's server restarts onto it (phone follows on open).
 #      Fail: nothing is pushed to main; the attempt goes to an
 #      upstream-sync/<date> branch and you get a notification.
@@ -112,7 +112,9 @@ tests (no new failures vs $OLD) and the production build passed.
 $SUBJECTS
 MSG
 if [ $DRY = 1 ]; then log "dry run: would release $NEW"; exit 0; fi
-git push -q origin main && git tag "v$NEW" && git push -q origin "v$NEW" || { notify "push of $NEW failed" high; exit 1; }
+# A version bump on main is enough: release.yml publishes v$NEW (and creates
+# the tag) by itself. Pushing a tag too would start a second release run.
+git push -q origin main || { notify "push of $NEW failed" high; exit 1; }
 log "pushed v$NEW; waiting for the release"
 
 API=https://api.github.com/repos/vinceychu/meander/releases/latest

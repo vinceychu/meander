@@ -218,12 +218,7 @@ Your installed apps update from your GitHub repo, https://github.com/vinceychu/m
 **Publishing a new version** (what I do after a fix):
 
 1. Bump `version` in `package.json` (e.g. `0.3.9` → `0.3.10`) and commit.
-2. Push, then tag it and push the tag:
-
-   ```bash
-   git push origin main && git tag v0.3.10 && git push origin v0.3.10
-   ```
-
+2. Get it onto `main` (push or merge the PR). That's all: a `main` push whose version has no release yet starts the release, and the release creates the `v0.3.10` tag. No tag push, so no machine needs GitHub credentials. (Pushing a tag by hand, or **Actions → Release → Run workflow**, still works.)
 3. GitHub Actions (`.github/workflows/release.yml`) builds the Linux and Intel-Mac apps on GitHub's machines, uploads them, and publishes the release. That takes about 15 minutes. Then every installed copy picks it up.
 
 **Renaming the app or changing its icon is just another update.** Change `PRODUCT_NAME` in `electron/main.cjs` and `productName` in `electron-builder.yml`, or edit `build/icon-meander.svg` and run `node scripts/make-icons.mjs`, then publish. On the Mac the update swaps in the renamed app and its new icon. On Linux the app rewrites its own app-menu entry and icon on the first start after the update (`electron/linux-desktop-entry.cjs`). A few internal labels must never change, or installed copies would lose their data or stop finding updates. `tests/update-chain.test.ts` fails if any of them do.
@@ -277,7 +272,7 @@ Meander is built on LearnHarness (https://github.com/amosblomqvist/learnharness)
 
 - **Check:** `scripts/sync-upstream.sh --check` lists upstream commits not yet in Meander. A weekly GitHub Action (`.github/workflows/upstream-check.yml`) opens or updates an `upstream-sync` issue when there are any.
 - **Merge:** `scripts/sync-upstream.sh` merges them into the working tree as one commit's worth of changes (none of upstream's history enters Meander's). It settles the conflicts that come up every time (Meander's version and name in `package.json`, the lockfile) by itself. Resolve anything else, run `npm run typecheck && npm test`, commit, then publish as usual.
-- **Automatic (the 5090):** `meander-autosync.timer` runs `scripts/auto-upstream.sh` every night around 4:30. When upstream has new commits it merges them in a separate checkout (`~/projects/meander-autosync`), runs typecheck, lint, the tests (a test that already failed on main doesn't count against it) and the production build. If all pass it bumps the patch version, pushes `main` and the tag, waits for the GitHub release, and restarts this PC's server onto it; your phone gets it next time you open Meander, other installs within 4 hours. If a code conflict or a new failure stops it, nothing reaches `main`: the attempt is pushed to an `upstream-sync/<date>` branch and you get a phone notification. Log: `~/.cache/meander-autosync.log`. Set up once with `bash scripts/install-autosync.sh`; rehearse with `MEANDER_FORCE_BASE=<older upstream sha> scripts/auto-upstream.sh --dry-run`.
+- **Automatic (the 5090):** `meander-autosync.timer` runs `scripts/auto-upstream.sh` every night around 4:30. When upstream has new commits it merges them in a separate checkout (`~/projects/meander-autosync`), runs typecheck, lint, the tests (a test that already failed on main doesn't count against it) and the production build. If all pass it bumps the patch version, pushes `main` (which starts the release), waits for the GitHub release, and restarts this PC's server onto it; your phone gets it next time you open Meander, other installs within 4 hours. If a code conflict or a new failure stops it, nothing reaches `main`: the attempt is pushed to an `upstream-sync/<date>` branch and you get a phone notification. Log: `~/.cache/meander-autosync.log`. Set up once with `bash scripts/install-autosync.sh`; rehearse with `MEANDER_FORCE_BASE=<older upstream sha> scripts/auto-upstream.sh --dry-run`.
 - **Server updates land:** `meander.service` first frees port 8710 from an orphaned server left behind by a hard kill (`scripts/meander-reclaim-port.sh`); before, such an orphan blocked every update.
 
 **New in 0.5.8** (upstream LearnHarness 0.3.9 → 0.5.0, merged 2026-11-04):
