@@ -41,6 +41,11 @@ if [ ! -d "$WORK/.git" ]; then
 	git clone -q "$REPO_URL" "$WORK" || { notify "clone failed" high; exit 1; }
 fi
 cd "$WORK" || exit 1
+# Push over the repo's SSH deploy key when this PC has one (~/.ssh/config
+# "Host github-meander"); fetches stay on public HTTPS. No gh token needed.
+PUSH_URL=${MEANDER_PUSH_URL:-}
+[ -z "$PUSH_URL" ] && grep -q "^Host github-meander" "$HOME/.ssh/config" 2>/dev/null && PUSH_URL=git@github-meander:vinceychu/meander.git
+[ -n "$PUSH_URL" ] && git remote set-url --push origin "$PUSH_URL"
 git merge --abort >/dev/null 2>&1; git reset -q --hard; git clean -qfdx -e node_modules
 git fetch -q origin main --tags || { notify "fetch failed" high; exit 1; }
 git checkout -q -B main origin/main
