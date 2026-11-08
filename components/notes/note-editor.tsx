@@ -18,6 +18,7 @@ import { autocompletion, closeBrackets, type CompletionContext, type CompletionR
 import { search, searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { tags as t } from "@lezer/highlight";
 import { livePreview, refreshLivePreview } from "./live-preview";
+import { Notes, localDate } from "@/src/core";
 
 export interface EditorHost {
 	resolve: (target: string) => string | null;
@@ -85,8 +86,7 @@ function toggleTask(view: EditorView): boolean {
 		const line = view.state.doc.lineAt(r.head);
 		const m = /^(\s*)([-*+]|\d+[.)])\s+\[([ xX])\]\s/.exec(line.text);
 		if (m) {
-			const at = line.from + m[0].indexOf("[") + 1;
-			changes.push({ from: at, to: at + 1, insert: m[3] === " " ? "x" : " " });
+			changes.push({ from: line.from, to: line.to, insert: Notes.toggleTaskText(line.text, localDate(Date.now())) });
 		} else {
 			const lm = /^(\s*)([-*+]|\d+[.)])\s+/.exec(line.text);
 			if (lm) changes.push({ from: line.from + lm[0].length, insert: "[ ] " });

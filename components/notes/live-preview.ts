@@ -9,6 +9,7 @@
 import { syntaxTree } from "@codemirror/language";
 import { RangeSetBuilder, type EditorState, type Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { Notes, localDate } from "@/src/core";
 
 export interface LivePreviewHost {
 	resolve: (target: string) => string | null;
@@ -32,8 +33,9 @@ class CheckboxWidget extends WidgetType {
 		box.setAttribute("aria-label", this.checked ? "Mark not done" : "Mark done");
 		box.addEventListener("mousedown", (e) => {
 			e.preventDefault();
-			const ch = view.state.sliceDoc(this.pos, this.pos + 1);
-			view.dispatch({ changes: { from: this.pos, to: this.pos + 1, insert: ch === " " ? "x" : " " } });
+			const line = view.state.doc.lineAt(this.pos);
+			const next = Notes.toggleTaskText(line.text, localDate(Date.now()));
+			if (next !== line.text) view.dispatch({ changes: { from: line.from, to: line.to, insert: next } });
 		});
 		return box;
 	}
