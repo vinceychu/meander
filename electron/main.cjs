@@ -942,7 +942,7 @@ function refreshMacIdentity() {
 		const bundle = macSelfUpdate.appBundlePath(process.execPath);
 		const icns = path.join(process.resourcesPath, "icon.icns");
 		if (!bundle || !fs.existsSync(icns)) return;
-		const hash = require("node:crypto").createHash("sha1").update(fs.readFileSync(icns)).digest("hex");
+		const hash = require("node:crypto").createHash("sha1").update("lsregister-v2:").update(fs.readFileSync(icns)).digest("hex");
 		const stampFile = path.join(app.getPath("userData"), "icon-stamp.json");
 		let stamp = null;
 		try {
@@ -950,12 +950,18 @@ function refreshMacIdentity() {
 		} catch {}
 		if (stamp === hash) return;
 		setTimeout(() => {
+			// touch + Dock restart alone often leaves LaunchServices' cached
+			// icon (0.6.0 kept the old mark): force-re-register the bundle first.
+			const lsregister =
+				"/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 			execFile("/usr/bin/touch", [bundle], () => {
+				execFile(lsregister, ["-f", bundle], () => {
 				execFile("/usr/bin/killall", ["Dock"], () => {
 					try {
 						fs.writeFileSync(stampFile, JSON.stringify({ hash, at: new Date().toISOString() }));
 					} catch {}
 					log(`mac icon cache refreshed (${hash.slice(0, 8)})`);
+				});
 				});
 			});
 		}, 3000);
