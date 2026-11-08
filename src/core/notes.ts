@@ -340,12 +340,33 @@ export function extractTasks(text: string): TaskItem[] {
 	return out;
 }
 
+const TASK_BOX = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX\-/])\]/;
+const DONE_STAMP = /\s*✅\s*(\d{4}-\d{2}-\d{2})/;
+
+/** The "✅ YYYY-MM-DD" completion date on a task (Obsidian Tasks convention). */
+export function taskDoneDate(text: string): string | null {
+	return DONE_STAMP.exec(text)?.[1] ?? null;
+}
+
+/** Toggle one task line. Checking stamps "✅ today" when `today` is given; unchecking removes the stamp. */
+export function toggleTaskText(l: string, today?: string): string {
+	const m = TASK_BOX.exec(l);
+	if (!m) return l;
+	const checking = m[2] === " ";
+	const out = l.slice(0, m[1]!.length) + (checking ? "x" : " ") + l.slice(m[1]!.length + 1);
+	if (!checking) return out.replace(DONE_STAMP, "");
+	if (!today || DONE_STAMP.test(out)) return out;
+	const blockId = /\s\^[A-Za-z0-9-]+\s*$/.exec(out);
+	const at = blockId ? blockId.index : out.trimEnd().length;
+	return `${out.slice(0, at).trimEnd()} ✅ ${today}${out.slice(at)}`;
+}
+
 /** Toggle the checkbox on a given line. */
-export function toggleTaskLine(text: string, line: number): string {
+export function toggleTaskLine(text: string, line: number, today?: string): string {
 	const lines = text.split("\n");
 	const l = lines[line];
 	if (l === undefined) return text;
-	lines[line] = l.replace(/^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX\-/])(\])/, (_m, a: string, s: string, b: string) => `${a}${s === " " ? "x" : " "}${b}`);
+	lines[line] = toggleTaskText(l, today);
 	return lines.join("\n");
 }
 

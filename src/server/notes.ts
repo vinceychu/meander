@@ -19,6 +19,7 @@ import {
 	type VaultFile,
 	type VaultIndex,
 } from "../core/notes.ts";
+import { notesProgressFrom, type NotesProgress } from "../core/notes-progress.ts";
 
 export { NotesPathError, NotesConflictError } from "../store/notes.ts";
 export const notesVault = {
@@ -65,6 +66,12 @@ function noteTexts(index: VaultIndex): { meta: NoteMeta; text: string }[] {
 
 export function notesSearch(q: string, limit?: number) {
 	return searchNotes(q, noteTexts(notesIndex()), limit);
+}
+
+/** Checklist progress across the vault (the /stats page's notes section). */
+export function notesProgress(now: number = Date.now(), skipFolders: string[] = ["Templates"]): NotesProgress {
+	const rows = noteTexts(notesIndex()).map(({ meta, text }) => ({ path: meta.path, title: meta.title, mtime: meta.mtime, text }));
+	return notesProgressFrom(rows, now, { skipFolders });
 }
 
 /** Backlinks with the linking line for context, plus unlinked mentions. */

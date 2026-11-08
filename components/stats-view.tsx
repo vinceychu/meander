@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DownloadIcon, FlameIcon } from "lucide-react";
-import type { StudyStats } from "@/src/core";
+import type { NotesProgress, StudyStats } from "@/src/core";
 import { SidebarToggle } from "@/components/sidebar";
 
 /**
@@ -74,9 +74,71 @@ function Bars({
 	);
 }
 
+function NotesProgressSection({ progress }: { progress: NotesProgress }) {
+	const { totals } = progress;
+	const pct = totals.total ? Math.round((totals.done / totals.total) * 100) : 0;
+	return (
+		<section data-testid="notes-progress" className="mt-8">
+			<h2 className="text-base font-semibold text-foreground">Learning progress</h2>
+			<p className="mt-1 text-xs text-muted-foreground">
+				From checklists in your notes. Write <code className="rounded bg-muted px-1">- [ ] Problem 0</code> lines in a note and check them off; checking stamps today&apos;s date.
+			</p>
+			{totals.total === 0 ? (
+				<p className="mt-4 text-sm text-muted-foreground">No checklists yet.</p>
+			) : (
+				<>
+					<div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+						<Tile label="Tasks done" value={`${totals.done}/${totals.total}`} sub={`${pct}% overall`} />
+						<Tile label="Done last 7 days" value={totals.doneLast7Days} sub={`${totals.notes} note${totals.notes === 1 ? "" : "s"} with checklists`} />
+					</div>
+					<div className="mt-3 grid gap-3 md:grid-cols-2">
+						<Bars
+							title="Tasks completed"
+							note="last 30 days"
+							items={progress.days.map((d) => ({ key: d.date, label: shortDate(d.date), value: d.done }))}
+							format={(v) => `${v} done`}
+						/>
+						<section className="rounded-lg border bg-card px-4 py-3">
+							<h2 className="font-ui text-xs uppercase tracking-wider text-muted-foreground">By note</h2>
+							<ul className="mt-3 space-y-2">
+								{progress.notes.slice(0, 12).map((n) => {
+									const p = Math.round((n.done / n.total) * 100);
+									return (
+										<li key={n.path}>
+											<a href={`/notes?open=${encodeURIComponent(n.path)}`} className="block rounded-sm hover:bg-accent/50" title={n.path}>
+												<div className="flex items-baseline justify-between gap-2 text-xs">
+													<span className="truncate text-card-foreground">{n.title}</span>
+													<span className="shrink-0 tabular-nums text-muted-foreground">
+														{n.done}/{n.total} · {p}%
+													</span>
+												</div>
+												<div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+													<div className={p === 100 ? "h-full bg-green-500/80" : "h-full bg-primary/70"} style={{ width: `${p}%` }} />
+												</div>
+											</a>
+										</li>
+									);
+								})}
+							</ul>
+						</section>
+					</div>
+					<p className="mt-2 text-xs text-muted-foreground">A checked task without a ✅ date counts on its note&apos;s last-edit day.</p>
+				</>
+			)}
+		</section>
+	);
+}
+
 export function StatsView() {
 	const [stats, setStats] = useState<StudyStats | null>(null);
 	const [failed, setFailed] = useState(false);
+	const [progress, setProgress] = useState<NotesProgress | null>(null);
+	useEffect(() => {
+		fetch("/api/notes/progress")
+			.then((r) => (r.ok ? (r.json() as Promise<NotesProgress>) : null))
+			.then(setProgress)
+			.catch(() => setProgress(null));
+	}, []);
 	useEffect(() => {
 		fetch("/api/stats")
 			.then((r) => (r.ok ? (r.json() as Promise<StudyStats>) : Promise.reject(new Error(String(r.status)))))
@@ -104,6 +166,8 @@ export function StatsView() {
 						Export to Anki
 					</a>
 				</div>
+
+				{progress ? <NotesProgressSection progress={progress} /> : null}
 
 				{failed ? <p className="mt-6 text-sm text-muted-foreground">Couldn&apos;t load stats.</p> : null}
 				{!stats && !failed ? <p className="mt-6 text-sm text-muted-foreground">Loading…</p> : null}

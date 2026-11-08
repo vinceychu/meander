@@ -47,7 +47,7 @@ import {
 	WaypointsIcon,
 	type LucideIcon,
 } from "lucide-react";
-import { Notes } from "@/src/core";
+import { Notes, localDate } from "@/src/core";
 import { cn } from "@/lib/utils";
 import { NoteEditor, type EditorHost, type NoteEditorHandle } from "./note-editor";
 import { NoteReader } from "./note-reader";
@@ -173,6 +173,8 @@ export function NotesApp() {
 	const [cursorLine, setCursorLine] = useState(0);
 	const [menu, setMenu] = useState<{ x: number; y: number; items: { label: string; icon?: LucideIcon; run: () => void; danger?: boolean }[] } | null>(null);
 	const [renaming, setRenaming] = useState<string | null>(null);
+	// Only one rename input may mount: two autoFocus inputs steal focus and the loser's blur cancels the rename.
+	const [renameInTree, setRenameInTree] = useState(false);
 	const [narrow, setNarrow] = useState(false);
 	const editorHandle = useRef<NoteEditorHandle | null>(null);
 	const tabsRef = useRef(tabs);
@@ -908,9 +910,10 @@ graph LR; Note-->Lesson; Note-->Practice; Note-->Graph
 								<FileTree
 									index={index}
 									activePath={active?.path ?? null}
-									renaming={renaming}
+									renaming={renameInTree ? renaming : null}
 									onRenameDone={(from, to) => {
 										setRenaming(null);
+										setRenameInTree(false);
 										if (to) void rename(from, to);
 									}}
 									onOpen={(p, newTab) => open(p, { newTab })}
@@ -921,12 +924,12 @@ graph LR; Note-->Lesson; Note-->Practice; Note-->Graph
 											? [
 													{ label: "New note here", icon: FilePlusIcon, run: () => void createNote({ folder: path }) },
 													{ label: "New folder here", icon: FolderPlusIcon, run: () => void createFolder(path) },
-													{ label: "Rename", icon: PencilIcon, run: () => setRenaming(path) },
+													{ label: "Rename", icon: PencilIcon, run: () => { setRenameInTree(true); setRenaming(path); } },
 													{ label: "Delete", icon: Trash2Icon, run: () => void remove(path), danger: true },
 												]
 											: [
 													{ label: "Open in new tab", icon: PlusIcon, run: () => open(path, { newTab: true }) },
-													{ label: "Rename", icon: PencilIcon, run: () => setRenaming(path) },
+													{ label: "Rename", icon: PencilIcon, run: () => { setRenameInTree(true); setRenaming(path); } },
 													{ label: bookmarks.includes(path) ? "Remove bookmark" : "Bookmark", icon: BookmarkIcon, run: () => toggleBookmark(path) },
 													{ label: "Copy wikilink", icon: Link2Icon, run: () => resolver && void navigator.clipboard?.writeText(`[[${resolver.linkText(path)}]]`) },
 													{ label: "Delete", icon: Trash2Icon, run: () => void remove(path), danger: true },
@@ -985,7 +988,7 @@ graph LR; Note-->Lesson; Note-->Practice; Note-->Graph
 						<div className="flex min-h-0 flex-1 flex-col">
 							<NoteHeader
 								path={active.path}
-								renaming={renaming === active.path}
+								renaming={renaming === active.path && !renameInTree}
 								onRename={(to) => { setRenaming(null); if (to) void rename(active.path!, to); }}
 								onStartRename={() => setRenaming(active.path)}
 							/>
@@ -1053,9 +1056,10 @@ graph LR; Note-->Lesson; Note-->Practice; Note-->Graph
 								<div className={cn("mx-auto px-6 pb-[40vh] pt-4", prefs.readableWidth ? "max-w-[46rem]" : "max-w-none")}>
 									<NoteHeader
 										path={active.path}
-										renaming={renaming === active.path}
+										renaming={renaming === active.path && !renameInTree}
 										onRename={(to) => { setRenaming(null); if (to) void rename(active.path!, to); }}
 										onStartRename={() => setRenaming(active.path)}
+										onEnter={() => setTimeout(() => editorHandle.current?.view?.focus(), 150)}
 										big
 									/>
 									{active.mode !== "source" && fm && (fm.present || Object.keys(fm.props).length > 0) && (
@@ -1073,7 +1077,7 @@ graph LR; Note-->Lesson; Note-->Practice; Note-->Graph
 											onCreate={(t) => void createNote({ title: t, folder: prefs.newNoteFolder })}
 											onToggleTask={(i) => {
 												const task = Notes.extractTasks(active.text)[i];
-												if (task) setText(active.id, Notes.toggleTaskLine(active.text, task.line));
+												if (task) setText(active.id, Notes.toggleTaskLine(active.text, task.line, localDate(Date.now())));
 											}}
 										/>
 									) : (
@@ -1331,10 +1335,17 @@ function ModeSwitch({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void })
 	);
 }
 
-function NoteHeader({ path, renaming, onRename, onStartRename, big }: { path: string; renaming: boolean; onRename: (to: string | null) => void; onStartRename: () => void; big?: boolean }) {
+function NoteHeader({ path, renaming, onRename, onStartRename, onEnter, big }: { path: string; renaming: boolean; onRename: (to: string | null) => void; onStartRename: () => void; onEnter?: () => void; big?: boolean }) {
 	const title = Notes.noteTitle(path);
 	const ext = Notes.extOf(path);
+	const committed = useRef(false);
+	useEffect(() => {
+		if (renaming) committed.current = false;
+	}, [renaming]);
 	const commit = (v: string) => {
+		// Enter commits, then the input unmounts and fires blur; commit once.
+		if (committed.current) return;
+		committed.current = true;
 		const clean = v.replace(Notes.ILLEGAL_NAME_CHARS, " ").trim();
 		if (!clean || clean === title) return onRename(null);
 		const dir = Notes.dirname(path);
@@ -1348,8 +1359,15 @@ function NoteHeader({ path, renaming, onRename, onStartRename, big }: { path: st
 				onFocus={(e) => e.currentTarget.select()}
 				onBlur={(e) => commit(e.currentTarget.value)}
 				onKeyDown={(e) => {
-					if (e.key === "Enter") commit(e.currentTarget.value);
-					if (e.key === "Escape") onRename(null);
+					if (e.key === "Enter") {
+						e.preventDefault();
+						commit(e.currentTarget.value);
+						onEnter?.();
+					}
+					if (e.key === "Escape") {
+						committed.current = true;
+						onRename(null);
+					}
 				}}
 				className={cn("w-full bg-transparent font-title outline-none", big ? "mb-3 text-3xl" : "px-4 py-2 text-lg")}
 				data-testid="note-title-input"
