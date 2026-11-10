@@ -62,7 +62,7 @@ export async function runCommandGrader(
 	if (argv.length === 0) {
 		return { ok: false, lines: [], passed: 0, total: 0, causes: [], grader, output: "no grader command" };
 	}
-	const cwd = opts.workDir ? path.join(folder, opts.workDir) : folder;
+	const cwd = opts.workDir ? path.join(/*turbopackIgnore: true*/ folder, opts.workDir) : folder;
 	const result = await runSandboxed(argv[0]!, argv.slice(1), {
 		cwd,
 		writable: [folder],
