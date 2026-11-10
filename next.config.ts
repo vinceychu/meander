@@ -60,6 +60,11 @@ const nextConfig: NextConfig = {
 			"github-copilot-credentials.json*",
 			"xai-credentials.json*",
 			".env*",
+			// 0.6.6: a dynamic course path made the tracer copy the whole repo root;
+			// the bundled .git (read-only pack files) broke mac codesign. Never ship them.
+			".git/**",
+			"**/.git/**",
+			"tests/**",
 		],
 	},
 	// Empirically verified gaps (2026-09-17 standalone smoke): the tracer
