@@ -149,11 +149,10 @@ function graderFor(draftGrader: string | undefined, specText: string): "check50"
 	if (/pytest/.test(text)) return "tests";
 	if (/npm (run )?test/.test(text)) return "tests";
 	if (/make test/.test(text)) return "tests";
-	// Nothing says how this problem is graded. Saying so is the honest
-	// answer: the course's own files may still give away a grader later
-	// (prepare records it), but until then this problem has NO autograder
-	// — it is not quietly promised an AI review either.
-	return "none";
+	// Nothing says how this problem is graded: the AI reviews it (the
+	// course's own files may still give away a grader later — prepare
+	// records it).
+	return "ai-rubric";
 }
 
 /** Build the course's units from the extracted outline. */

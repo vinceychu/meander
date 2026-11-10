@@ -149,15 +149,51 @@ export function normalizeUrl(url: string): string {
  *
  * A course's URL is often typed without its scheme ("cs61a.org"), and that
  * is a URL — a learner pasting one means the course's site, not a course
- * called "cs61a.org". A bare host (letters, digits, dots and dashes) with
- * at least one dot is a URL; a name ("python", "CS50x") never is.
+ * called "cs61a.org". A bare host (letters, digits, dots and dashes) whose
+ * last label is an alphabetic top-level domain is a URL; a name ("python",
+ * "CS50x"), a course number ("6.006", "18.06") or a library ("node.js")
+ * never is.
  */
 export function isWebUrl(ref: string): boolean {
 	const trimmed = ref.trim();
 	if (!trimmed) return false;
 	if (/^https?:\/\//i.test(trimmed)) return true;
-	return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(\/[^\s]*)?$/i.test(trimmed);
+	const match = /^((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+([a-z]{2,63}))(\/\S*)?$/i.exec(trimmed);
+	if (!match) return false;
+	return !FILE_SUFFIXES.has(match[2]!.toLowerCase());
 }
+
+/** The suffixes that name a file or a library ("node.js", "main.py"), not
+ *  a top-level domain — a bare "x.js" is never taken for a host. */
+const FILE_SUFFIXES = new Set([
+	"js",
+	"ts",
+	"jsx",
+	"tsx",
+	"mjs",
+	"cjs",
+	"py",
+	"rb",
+	"rs",
+	"go",
+	"java",
+	"kt",
+	"cpp",
+	"hpp",
+	"cs",
+	"php",
+	"sh",
+	"md",
+	"txt",
+	"json",
+	"html",
+	"htm",
+	"css",
+	"sql",
+	"ipynb",
+	"zip",
+	"pdf",
+]);
 
 /** A web page's URL, with its scheme (a bare host becomes https). */
 export function asWebUrl(ref: string): string {
@@ -166,79 +202,57 @@ export function asWebUrl(ref: string): string {
 }
 
 /**
- * The words that mark a page as a course's own page.
+ * The signals that mark a page as a course's own page.
  *
  * A web search for a course's name also returns a forum thread about it,
  * a Wikipedia entry, a blog post. Only the course's own site is the
  * course — so the page that the search picks has to be CHECKED, not
- * assumed.
+ * assumed. A word like "course" is on every one of those pages, so it is
+ * not a signal; the structure of a course is.
  */
-const COURSE_WORDS = [
-	"course",
-	"courses",
-	"coursework",
-	"syllabus",
-	"curriculum",
-	"schedule",
-	"week",
-	"weeks",
-	"module",
-	"modules",
-	"lecture",
-	"lectures",
-	"assignment",
-	"assignments",
-	"homework",
-	"homeworks",
-	"lab",
-	"labs",
-	"pset",
-	"psets",
-	"project",
-	"projects",
-	"readings",
-	"student",
-	"students",
-	"instructor",
-	"instructors",
-	"professor",
-	"credits",
-	"exams",
+const COURSE_SIGNALS: RegExp[] = [
+	/\bsyllabus\b/,
+	/\bschedule\b/,
+	/\blectures?\b/,
+	/\bassignments?\b/,
+	/\blabs?\b/,
+	/\bhomeworks?\b/,
+	/\boffice hours\b/,
+	/\bweek \d+\b/,
+	/\b(problem sets?|psets?)\b/,
+	/\b(midterms?|final exam|exams?)\b/,
+	/\breadings?\b/,
 ];
 
-/** The words that are enough on their own. */
-const STRONG_COURSE_WORDS = new Set([
-	"course",
-	"courses",
-	"coursework",
-	"syllabus",
-	"curriculum",
-	"assignments",
-	"homework",
-]);
+/** How many distinct signals a course's own page shows, at least. */
+const MIN_COURSE_SIGNALS = 3;
+
+/** The hosts that talk ABOUT a course and are never the course itself. */
+const NOT_COURSE_HOSTS = ["wikipedia.org", "reddit.com", "redd.it", "stackoverflow.com", "stackexchange.com", "quora.com", "medium.com"];
 
 /**
  * Does this page look like a course's own page?
  *
- * The page is READ, not guessed at: a course's page says "course",
- * "syllabus", "assignments" (and links to them). A page that says none of
- * that is not the course — the search moves on to the next hit.
+ * The page is READ, not guessed at: a course's page has a syllabus, a
+ * schedule, lectures, assignments, labs, office hours, "Week 3"… — at
+ * least three of those. A page on an encyclopedia, a forum or a blog host
+ * is never the course, whatever it says. A page that fails either check is
+ * not the course — the search moves on to the next hit.
  */
-export function looksLikeCoursePage(html: string): boolean {
-	const words = new Set(
-		htmlToText(html)
-			.slice(0, 20_000)
-			.toLowerCase()
-			.match(/[a-z]+/g) ?? [],
-	);
-	let hits = 0;
-	let strong = false;
-	for (const word of COURSE_WORDS) {
-		if (!words.has(word)) continue;
-		hits++;
-		if (STRONG_COURSE_WORDS.has(word)) strong = true;
+export function looksLikeCoursePage(html: string, url?: string): boolean {
+	if (url) {
+		let host = "";
+		try {
+			host = new URL(asWebUrl(url)).hostname.toLowerCase();
+		} catch {
+			return false;
+		}
+		if (NOT_COURSE_HOSTS.some((blocked) => host === blocked || host.endsWith(`.${blocked}`))) return false;
 	}
-	return hits >= 2 || (hits >= 1 && strong);
+	const text = htmlToText(html).slice(0, 20_000).toLowerCase().replace(/\s+/g, " ");
+	let signals = 0;
+	for (const signal of COURSE_SIGNALS) if (signal.test(text)) signals++;
+	return signals >= MIN_COURSE_SIGNALS;
 }
 
 /** The allowed-URL set, normalized. */
@@ -336,8 +350,11 @@ export function stripInventedUrls(draft: OutlineDraft, allowed: Set<string>): { 
 				...(problem.grader !== undefined ? { grader: problem.grader } : {}),
 			});
 		}
+		// The unit is rebuilt field by field, never spread: a spread would
+		// carry an invented pageUrl straight through.
 		units.push({
-			...unit,
+			title: unit.title,
+			...(unit.summary !== undefined ? { summary: unit.summary } : {}),
 			...(pageUrl !== undefined ? { pageUrl } : {}),
 			...(notesUrls !== undefined ? { notesUrls } : {}),
 			...(videos !== undefined ? { videos } : {}),

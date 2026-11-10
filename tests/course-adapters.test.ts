@@ -33,7 +33,7 @@ import { parseProblemSetPage, parseSpecPage, parseUnitIndex, parseUnitPage } fro
 import { detectGrader, checksToLines, parseTestOutput, summaryLine } from "../src/core/course-graders.ts";
 import { graderLabel, graderOf } from "../src/core/course-adapters.ts";
 import type { CrawledPage } from "../src/core/course-crawl.ts";
-import { asWebUrl, extractOutline, isWebUrl, looksLikeCoursePage } from "../src/core/course-outline.ts";
+import { allowedUrlSet, asWebUrl, extractOutline, isWebUrl, looksLikeCoursePage, stripInventedUrls } from "../src/core/course-outline.ts";
 import type { CourseRequest } from "../src/core/courses.ts";
 import { adapterFor, findCoursePage, resolveCourseRef } from "../src/server/course-adapters/index.ts";
 import { cs50Adapter, cs50CourseFor, looseCs50Course, problemIdFromPath } from "../src/server/course-adapters/cs50.ts";
@@ -780,5 +780,128 @@ describe("the starter repository the course hands out", () => {
 		} finally {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}
+	});
+});
+
+// ─── 8. the review's regressions ────────────────────────────────────────────
+
+describe("the URL law drops EVERY invented URL", () => {
+	it("drops an invented unit pageUrl (and every other URL field)", () => {
+		const invented = {
+			title: "Widgets",
+			units: [
+				{
+					title: "u",
+					summary: "s",
+					pageUrl: "https://x.edu/invented",
+					notesUrls: ["https://x.edu/notes-invented", "https://x.edu/seen"],
+					videos: [{ title: "v", url: "https://x.edu/video-invented", youtubeId: "abc" }],
+					problems: [
+						{ title: "p", specUrl: "https://x.edu/seen", starterUrl: "https://x.edu/zip-invented", repoUrl: "https://x.edu/repo-invented" },
+					],
+				},
+			],
+		};
+		const { draft, dropped } = stripInventedUrls(invented, allowedUrlSet(["https://x.edu/seen"]));
+		assert.deepEqual(draft, {
+			title: "Widgets",
+			units: [
+				{
+					title: "u",
+					summary: "s",
+					notesUrls: ["https://x.edu/seen"],
+					videos: [{ title: "v", youtubeId: "abc" }],
+					problems: [{ title: "p", specUrl: "https://x.edu/seen" }],
+				},
+			],
+		});
+		assert.ok(!JSON.stringify(draft).includes("invented"), "no invented URL survives");
+		assert.equal(dropped.length, 5);
+	});
+
+	it("keeps a seen unit pageUrl", () => {
+		const { draft, dropped } = stripInventedUrls(
+			{ title: "W", units: [{ title: "u", pageUrl: "https://x.edu/seen" }] },
+			allowedUrlSet(["https://x.edu/seen"]),
+		);
+		assert.equal(draft.units[0]!.pageUrl, "https://x.edu/seen");
+		assert.deepEqual(dropped, []);
+	});
+});
+
+describe("a course number is not a URL", () => {
+	it("needs an alphabetic top-level domain", () => {
+		for (const name of ["6.006", "18.06", "6.S191", "node.js", "Vue.js", "main.py", "15-213"]) {
+			assert.equal(isWebUrl(name), false, `${name} is not a URL`);
+		}
+		for (const url of ["cs61a.org", "cs61a.org/sp/", "https://x.edu/y", "http://6.006.example.edu/", "www.cs.cmu.edu/~213/"]) {
+			assert.equal(isWebUrl(url), true, `${url} is a URL`);
+		}
+	});
+});
+
+describe("a course's own page shows a course's structure", () => {
+	const COURSE = "<html><body><h1>6.006</h1><p>Syllabus. Lecture notes. Week 1: problem set 1 due. Office hours Tuesday.</p></body></html>";
+
+	it("needs at least three distinct course signals", () => {
+		assert.equal(looksLikeCoursePage(COURSE), true);
+		assert.equal(looksLikeCoursePage("<p>This course is great. The course has a lecture.</p>"), false, "\"course\" alone is not a signal");
+		assert.equal(looksLikeCoursePage("<p>Lectures, lectures, lecture.</p>"), false, "one signal repeated is one signal");
+		assert.equal(looksLikeCoursePage("<p>The syllabus and the schedule.</p>"), false, "two signals are not enough");
+	});
+
+	it("rejects the hosts that talk ABOUT a course", () => {
+		for (const url of [
+			"https://en.wikipedia.org/wiki/6.006",
+			"https://www.reddit.com/r/mit/comments/1",
+			"https://stackoverflow.com/questions/1",
+			"https://www.quora.com/What-is-6-006",
+			"https://medium.com/@someone/6-006",
+			"https://someone.medium.com/6-006",
+		]) {
+			assert.equal(looksLikeCoursePage(COURSE, url), false, url);
+		}
+		assert.equal(looksLikeCoursePage(COURSE, "https://ocw.mit.edu/courses/6-006/"), true);
+	});
+
+	it("reads the search hits in parallel and keeps the search's order", async () => {
+		const provider = {
+			id: "brave" as const,
+			search: () =>
+				Promise.resolve([
+					{ title: "Wikipedia", url: "https://en.wikipedia.org/wiki/6.006", snippet: "" },
+					{ title: "Slow course", url: "https://slow.example.edu/", snippet: "" },
+					{ title: "Fast course", url: "https://fast.example.edu/", snippet: "" },
+				]),
+		};
+		let inFlight = 0;
+		let peak = 0;
+		const read = async (url: string): Promise<string> => {
+			inFlight++;
+			peak = Math.max(peak, inFlight);
+			await new Promise((resolve) => setTimeout(resolve, url.includes("slow") ? 50 : 5));
+			inFlight--;
+			return COURSE;
+		};
+		const page = await findCoursePage("6.006", { provider, fetch: read });
+		assert.equal(page, "https://slow.example.edu/", "the first course page in the search's order wins");
+		assert.equal(peak, 3, "the hits were read at the same time");
+	});
+});
+
+describe("a generic problem that names no grader", () => {
+	it("is AI-reviewed by default", async () => {
+		const outline = {
+			title: "Introduction to Widgets",
+			units: [
+				{
+					title: "Unit 1: Widgets",
+					problems: [{ title: "Essay", specUrl: "https://example.edu/course/syllabus.html" }],
+				},
+			],
+		};
+		const adapter = createGenericAdapter({ model: modelAnswering(outline), fetch: fakeFetch });
+		const result = await adapter.outline(REQUEST);
+		assert.equal(result.units[0]!.problems[0]!.grader, "ai-rubric");
 	});
 });

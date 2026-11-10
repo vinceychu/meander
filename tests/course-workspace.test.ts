@@ -311,3 +311,97 @@ describe("the editor reaches the course's subfolder", () => {
 		assert.equal(response.status, 400);
 	});
 });
+
+// ─── the law: a link never carries a save out of the folder ─────────────────
+
+const { readProblemFiles, saveProblemFile } = await import("../src/server/problem-files.ts");
+const { fileWith } = await import("../src/server/courses.ts");
+
+describe("a link in the folder is never followed", () => {
+	/** A problem folder and a file OUTSIDE it, in their own scratch dir. */
+	function scratch(): { folder: string; outside: string } {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-links-"));
+		const folder = path.join(root, "problem");
+		fs.mkdirSync(folder);
+		const outside = path.join(root, "outside.txt");
+		fs.writeFileSync(outside, "untouched", "utf-8");
+		return { folder, outside };
+	}
+
+	it("refuses to save through a link to a file outside the folder", () => {
+		const { folder, outside } = scratch();
+		fs.symlinkSync(outside, path.join(folder, "lab.py"));
+		assert.throws(() => saveProblemFile(folder, "lab.py", "PWNED"), /Invalid file name/);
+		assert.equal(fs.readFileSync(outside, "utf-8"), "untouched");
+	});
+
+	it("refuses to save through a linked folder inside the folder", () => {
+		const { folder, outside } = scratch();
+		fs.symlinkSync(path.dirname(outside), path.join(folder, "lab01"));
+		assert.throws(() => saveProblemFile(folder, "lab01/outside.txt", "PWNED"), /Invalid file name/);
+		assert.throws(() => saveProblemFile(folder, "lab01/new/x.py", "PWNED"), /Invalid file name/);
+		assert.equal(fs.readFileSync(outside, "utf-8"), "untouched");
+		assert.ok(!fs.existsSync(path.join(path.dirname(outside), "new")), "no folder was made through the link");
+	});
+
+	it("refuses the link through the editor's PUT too", async () => {
+		const outside = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "lh-links-")), "outside.txt");
+		fs.writeFileSync(outside, "untouched", "utf-8");
+		fs.mkdirSync(FOLDER, { recursive: true });
+		fs.symlinkSync(outside, path.join(FOLDER, "linked.py"));
+		const response = await putFile("linked.py", "PWNED");
+		assert.equal(response.status, 400);
+		assert.equal(fs.readFileSync(outside, "utf-8"), "untouched");
+		fs.unlinkSync(path.join(FOLDER, "linked.py"));
+	});
+
+	it("never reads a linked file into the editor", () => {
+		const { folder, outside } = scratch();
+		fs.writeFileSync(path.join(folder, "lab.py"), "print(1)\n", "utf-8");
+		fs.symlinkSync(outside, path.join(folder, "secret.txt"));
+		assert.deepEqual(
+			readProblemFiles(folder).map((file) => file.name),
+			["lab.py"],
+		);
+	});
+
+	it("still saves a plain file, in a new subfolder too", () => {
+		const { folder } = scratch();
+		saveProblemFile(folder, "lab01/lab01.py", "x = 1\n");
+		assert.equal(fs.readFileSync(path.join(folder, "lab01", "lab01.py"), "utf-8"), "x = 1\n");
+	});
+});
+
+// ─── the law: the Run pane runs the learner's file, not the course's tests ──
+
+describe("the file the Run pane runs", () => {
+	/** A folder with these files (relative name → content). */
+	function folderWith(files: string[]): string {
+		const folder = fs.mkdtempSync(path.join(os.tmpdir(), "lh-runfile-"));
+		for (const name of files) {
+			fs.mkdirSync(path.dirname(path.join(folder, name)), { recursive: true });
+			fs.writeFileSync(path.join(folder, name), "", "utf-8");
+		}
+		return folder;
+	}
+
+	it("prefers the file the spec / starter names", () => {
+		const folder = folderWith(["hw/aaa.py", "hw/main.py"]);
+		const { file, dir } = fileWith(folder, [".py"], "main.py", ["README.md", "hw/main.py"]);
+		assert.equal(file, "main.py");
+		assert.equal(dir, path.join(folder, "hw"));
+	});
+
+	it("never picks a file under tests/ or .grader/, and puts test-named files last", () => {
+		const folder = folderWith(["a_test.py", "tests/a.py", ".grader/a.py", "test_lab.py", "lab01/lab.py"]);
+		const { file, dir } = fileWith(folder, [".py"], "main.py", ["tests/a.py", ".grader/a.py"]);
+		assert.equal(file, "lab.py");
+		assert.equal(dir, path.join(folder, "lab01"));
+	});
+
+	it("falls back to a test-named file only when there is nothing else", () => {
+		const folder = folderWith(["tests/a.py", "test_lab.py"]);
+		assert.equal(fileWith(folder, [".py"], "main.py").file, "test_lab.py");
+		assert.equal(fileWith(folderWith(["tests/a.py"]), [".py"], "main.py").file, "main.py");
+	});
+});

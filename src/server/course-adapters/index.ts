@@ -50,9 +50,12 @@ export interface CourseSearchOptions {
 	fetch?: (url: string) => Promise<string>;
 }
 
+/** How long one search hit's page may take (the hits are read together). */
+const CANDIDATE_TIMEOUT_MS = 8_000;
+
 /** The plain page fetch the search fallback reads with. */
 async function fetchPageText(url: string): Promise<string> {
-	const response = await fetch(url, { headers: { "User-Agent": "Meander (course lookup)" }, signal: AbortSignal.timeout(20_000) });
+	const response = await fetch(url, { headers: { "User-Agent": "Meander (course lookup)" }, signal: AbortSignal.timeout(CANDIDATE_TIMEOUT_MS) });
 	if (!response.ok) throw new Error(`the page answered ${response.status}`);
 	return response.text();
 }
@@ -62,9 +65,9 @@ async function fetchPageText(url: string): Promise<string> {
  *
  * The catalogue is asked first (the caller does that); this is the second
  * step — a web search for the course, and the first result whose page
- * REALLY looks like a course: it says "course", "syllabus",
- * "assignments"… (a search for a course name also returns a forum thread
- * or a Wikipedia entry, and those are not the course).
+ * REALLY looks like a course: a syllabus, a schedule, lectures, labs…
+ * (a search for a course name also returns a forum thread or a Wikipedia
+ * entry, and those are not the course).
  *
  * A search engine that is not configured is reported honestly: the answer
  * is "paste the URL", never a guess.
@@ -79,6 +82,7 @@ export async function findCoursePage(name: string, opts: CourseSearchOptions = {
 		return null;
 	}
 	const read = opts.fetch ?? fetchPageText;
+	const pages: string[] = [];
 	for (const hit of hits) {
 		const url = hit.url?.trim();
 		if (!url || !isUrl(url)) continue;
@@ -89,15 +93,22 @@ export async function findCoursePage(name: string, opts: CourseSearchOptions = {
 		} catch {
 			continue;
 		}
-		// The page has to look like a course's own page, or it is not the
-		// course — the search moves on to the next hit.
-		try {
-			const html = await read(page);
-			if (looksLikeCoursePage(html)) return page;
-		} catch {
-			/* a page that will not fetch is not the course's page */
-		}
+		pages.push(page);
 	}
+	// The hits are read together (one slow page does not hold up the
+	// rest), and the FIRST hit in the search's order that looks like a
+	// course's own page wins — the others are not the course.
+	const verdicts = await Promise.all(
+		pages.map(async (page) => {
+			try {
+				return looksLikeCoursePage(await read(page), page);
+			} catch {
+				return false; // a page that will not fetch is not the course's page
+			}
+		}),
+	);
+	const index = verdicts.indexOf(true);
+	if (index >= 0) return pages[index]!;
 	return null;
 }
 

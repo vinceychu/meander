@@ -41,7 +41,7 @@ import { cs50Adapter, cs50CourseFor } from "./course-adapters/cs50.ts";
 import { genericAdapter } from "./course-adapters/generic.ts";
 import { fetchPage, cachedPage } from "./course-pages.ts";
 import { runCourseTool, runCs50Tool } from "./course-tool.ts";
-import { readProblemFiles, languageOf, saveProblemFile } from "./problem-files.ts";
+import { readProblemFiles, languageOf, safeProblemPath, saveProblemFile } from "./problem-files.ts";
 import { runSandboxed, toolchainEnv, workspaceRoot, type RunResult } from "./toolchain.ts";
 import {
 	bindChat,
@@ -445,21 +445,61 @@ function missingTool(tool: string, hint: string): RunResult {
 }
 
 /**
- * The first source file of the problem's folder — or of one of its
- * subfolders, because a course that hands its lab out in "lab01/" keeps
- * the code there.
+ * The source file the Run pane runs: the one the problem's spec / starter
+ * names, else the first source file of the problem's folder — or of one of
+ * its subfolders, because a course that hands its lab out in "lab01/"
+ * keeps the code there.
+ *
+ * A course's own test suite is never the learner's program: nothing under
+ * a tests/ folder (or the hidden .grader/) is picked, and a file whose
+ * name says it is a test ("test_lab01.py", "lab01_test.go") comes after
+ * every other one.
  *
  * The file's own folder comes with it: the program runs WHERE it lives (a
  * lab's own imports and its data files are beside it).
  */
-function fileWith(folder: string, extensions: string[], fallback: string): { file: string; dir: string } {
-	const found = findWithExtension(folder, extensions, 0);
+export function fileWith(folder: string, extensions: string[], fallback: string, preferred: string[] = []): { file: string; dir: string } {
+	for (const name of preferred) {
+		if (!extensions.some((extension) => name.endsWith(extension))) continue;
+		if (inTestFolder(name)) continue;
+		let full: string;
+		try {
+			full = safeProblemPath(folder, name);
+		} catch {
+			continue;
+		}
+		try {
+			if (!fs.lstatSync(full).isFile()) continue;
+		} catch {
+			continue;
+		}
+		return { file: path.basename(full), dir: path.dirname(full) };
+	}
+	const found = findWithExtension(folder, extensions, 0, false) ?? findWithExtension(folder, extensions, 0, true);
 	if (!found) return { file: fallback, dir: folder };
 	return { file: path.basename(found), dir: path.dirname(found) };
 }
 
-/** The first file with one of these extensions, in the folder or a subfolder. */
-function findWithExtension(folder: string, extensions: string[], depth: number): string | null {
+/** The folders a course keeps its own tests (and grader) in. */
+const TEST_FOLDERS = new Set(["tests", "test", "__tests__", "spec", "specs", ".grader"]);
+
+/** Does this relative name live in a test folder? */
+function inTestFolder(name: string): boolean {
+	return name
+		.replace(/\\/g, "/")
+		.split("/")
+		.slice(0, -1)
+		.some((segment) => TEST_FOLDERS.has(segment));
+}
+
+/** Does this file's name say it is a test? */
+function isTestFile(name: string): boolean {
+	return /^test_|^test\.|[._-]test\.|[._-]spec\.|^conftest\.py$/i.test(name);
+}
+
+/** The first file with one of these extensions, in the folder or a
+ *  subfolder (test-named files only when `tests` is set). */
+function findWithExtension(folder: string, extensions: string[], depth: number, tests: boolean): string | null {
 	let entries: fs.Dirent[];
 	try {
 		entries = fs.readdirSync(folder, { withFileTypes: true });
@@ -468,14 +508,17 @@ function findWithExtension(folder: string, extensions: string[], depth: number):
 	}
 	for (const extension of extensions) {
 		for (const entry of entries) {
-			if (entry.isFile() && entry.name.endsWith(extension)) return path.join(folder, entry.name);
+			if (!entry.isFile() || !entry.name.endsWith(extension)) continue;
+			if (isTestFile(entry.name) !== tests) continue;
+			return path.join(folder, entry.name);
 		}
 	}
 	if (depth >= 3) return null;
 	for (const entry of entries) {
 		if (!entry.isDirectory()) continue;
 		if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "__pycache__") continue;
-		const found = findWithExtension(path.join(folder, entry.name), extensions, depth + 1);
+		if (TEST_FOLDERS.has(entry.name)) continue;
+		const found = findWithExtension(path.join(folder, entry.name), extensions, depth + 1, tests);
 		if (found) return found;
 	}
 	return null;
@@ -494,9 +537,11 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		return { ok: false, output: "The problem's files are not set up yet — open the problem first.", command: "" };
 	}
 	const language = problem.language;
+	// The files the spec / starter names are the learner's program.
+	const starterNames = problem.files.map((file) => file.name);
 
 	if (language === "c" || language === "cpp") {
-		const { file: source, dir } = fileWith(folder, language === "c" ? [".c"] : [".cpp", ".cc", ".cxx"], language === "c" ? "main.c" : "main.cpp");
+		const { file: source, dir } = fileWith(folder, language === "c" ? [".c"] : [".cpp", ".cc", ".cxx"], language === "c" ? "main.c" : "main.cpp", starterNames);
 		const target = source.replace(/\.(c|cpp|cc|cxx)$/, "");
 		const hasMakefile = fs.existsSync(path.join(dir, "Makefile"));
 		const build = hasMakefile
@@ -524,7 +569,7 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		return { ...run, output: `${build.output}\n${run.output}`, command: `${hasMakefile ? "make" : language === "c" ? "gcc" : "g++"} && ./${target}` };
 	}
 	if (language === "python") {
-		const { file, dir } = fileWith(folder, [".py"], "main.py");
+		const { file, dir } = fileWith(folder, [".py"], "main.py", starterNames);
 		return runSandboxed("python3", [file], {
 			cwd: dir,
 			writable: [folder],
@@ -534,7 +579,7 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		});
 	}
 	if (language === "javascript") {
-		const { file, dir } = fileWith(folder, [".js", ".mjs", ".cjs"], "main.js");
+		const { file, dir } = fileWith(folder, [".js", ".mjs", ".cjs"], "main.js", starterNames);
 		return runSandboxed("node", [file], {
 			cwd: dir,
 			writable: [folder],
@@ -544,7 +589,7 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		});
 	}
 	if (language === "typescript") {
-		const { file, dir } = fileWith(folder, [".ts", ".tsx"], "main.ts");
+		const { file, dir } = fileWith(folder, [".ts", ".tsx"], "main.ts", starterNames);
 		// Node strips the types itself (22.6+); tsx is the fallback for the
 		// boxes whose node is older.
 		const result = await runSandboxed("node", [file], {
@@ -566,7 +611,7 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		return result;
 	}
 	if (language === "sql") {
-		const { file, dir } = fileWith(folder, [".sql"], "main.sql");
+		const { file, dir } = fileWith(folder, [".sql"], "main.sql", starterNames);
 		const sql = fs.readFileSync(path.join(dir, file), "utf-8");
 		const result = await runSandboxed("sqlite3", [":memory:"], { cwd: dir, writable: [folder], timeoutMs: 20_000, input: sql });
 		if (!result.ok && /failed to start|ENOENT/i.test(result.output)) {
@@ -579,7 +624,7 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		return result;
 	}
 	if (language === "go") {
-		const { file, dir } = fileWith(folder, [".go"], "main.go");
+		const { file, dir } = fileWith(folder, [".go"], "main.go", starterNames);
 		return runSandboxed("go", ["run", file], {
 			cwd: dir,
 			writable: [folder],
@@ -589,7 +634,7 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		});
 	}
 	if (language === "rust") {
-		const { file, dir } = fileWith(folder, [".rs"], "main.rs");
+		const { file, dir } = fileWith(folder, [".rs"], "main.rs", starterNames);
 		const target = "main-rust";
 		const build = await runSandboxed("rustc", ["-O", "-o", target, file], { cwd: dir, writable: [folder] });
 		if (!build.ok) {

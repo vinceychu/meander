@@ -12,7 +12,7 @@
  * only in VS Code.
  *
  * A name may point INTO the folder, never out of it: "..", an absolute
- * path, a hidden folder or a link that leaves the folder is refused.
+ * path, a hidden folder or a link (a folder or the file itself) is refused.
  */
 
 import * as fs from "node:fs";
@@ -94,14 +94,10 @@ export function readProblemFiles(folder: string): Array<{ name: string; content:
 			}
 			if (!entry.isFile()) continue;
 			if (BINARY_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
-			let content: string;
-			try {
-				const stat = fs.statSync(full);
-				if (stat.size > MAX_FILE_BYTES) continue;
-				content = fs.readFileSync(full, "utf-8");
-			} catch {
-				continue;
-			}
+			// A link is never followed (entry.isFile() is false for one, and
+			// the open refuses one that appeared since).
+			const content = readNoFollow(full);
+			if (content === null) continue;
 			const name = `${prefix}${entry.name}`;
 			out.push({ name, content, language: languageOf(name) });
 		}
@@ -150,27 +146,66 @@ export function safeProblemPath(folder: string, name: string): string {
 	return target;
 }
 
-/** Save one file of a problem's folder (the learner's edit). */
+/** Save one file of a problem's folder (the learner's edit).
+ *
+ *  A course's own repository is cloned into the folder as it is, links
+ *  included — so a link anywhere on the way (a folder or the file itself)
+ *  is refused, and the file is opened without following one. */
 export function saveProblemFile(folder: string, name: string, content: string): void {
 	const target = safeProblemPath(folder, name);
-	const parent = path.dirname(target);
-	fs.mkdirSync(parent, { recursive: true });
-	// A folder that is really a link out of the problem's folder is
-	// refused too: the write must land inside the workspace.
 	const root = path.resolve(folder);
-	const rootReal = realPathOr(root);
-	const parentReal = realPathOr(parent);
-	if (parentReal !== rootReal && !parentReal.startsWith(rootReal + path.sep)) {
-		throw new Error("Invalid file name.");
+	refuseLinks(root, target);
+	fs.mkdirSync(path.dirname(target), { recursive: true });
+	// Checked again: the folders made just now are the app's own, but the
+	// check is cheap and closes the gap between the first one and the write.
+	refuseLinks(root, target);
+	const fd = fs.openSync(target, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | NO_FOLLOW, 0o644);
+	try {
+		fs.writeFileSync(fd, content, "utf-8");
+	} finally {
+		fs.closeSync(fd);
 	}
-	fs.writeFileSync(target, content, "utf-8");
 }
 
-/** A path with its links resolved (the path itself when it cannot be read). */
-function realPathOr(target: string): string {
+/** Open without following a link (where the platform has the flag). */
+const NO_FOLLOW = fs.constants.O_NOFOLLOW ?? 0;
+
+/** Read one file without following a link (null when it is one, or unreadable). */
+function readNoFollow(full: string): string | null {
+	let fd: number;
 	try {
-		return fs.realpathSync(target);
+		fd = fs.openSync(full, fs.constants.O_RDONLY | NO_FOLLOW);
 	} catch {
-		return target;
+		return null;
+	}
+	try {
+		const stat = fs.fstatSync(fd);
+		if (!stat.isFile() || stat.size > MAX_FILE_BYTES) return null;
+		return fs.readFileSync(fd, "utf-8");
+	} catch {
+		return null;
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+/**
+ * Refuse a path inside the folder if any part of it — a folder on the way
+ * or the file itself — is a link. The parts that do not exist yet are
+ * fine (they will be made as real folders).
+ */
+function refuseLinks(root: string, target: string): void {
+	const relative = path.relative(root, target);
+	let current = root;
+	for (const segment of relative.split(path.sep)) {
+		if (!segment) continue;
+		current = path.join(current, segment);
+		let stat: fs.Stats;
+		try {
+			stat = fs.lstatSync(current);
+		} catch {
+			return; // the rest of the path does not exist yet
+		}
+		if (stat.isSymbolicLink()) throw new Error("Invalid file name.");
 	}
 }
