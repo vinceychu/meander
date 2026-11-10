@@ -354,11 +354,13 @@ export async function prepareProblem(course: Course, problem: CourseProblem): Pr
 	const prepared = await adapter.prepare(request, problem, folder);
 	// The grader the course's own files gave away is recorded on the
 	// problem: the label the course page shows and the check that runs
-	// must never disagree.
+	// must never disagree. Only the fields the adapter actually REPORTED
+	// are compared — an adapter that reports no grader says nothing, and
+	// says nothing is not a change.
 	const graderChanged =
 		(prepared.grader !== undefined && prepared.grader !== problem.grader) ||
-		(prepared.graderCommand ?? "") !== (problem.graderCommand ?? "") ||
-		(prepared.graderWorkDir ?? "") !== (problem.graderWorkDir ?? "");
+		(prepared.graderCommand !== undefined && prepared.graderCommand !== (problem.graderCommand ?? "")) ||
+		(prepared.graderWorkDir !== undefined && prepared.graderWorkDir !== (problem.graderWorkDir ?? ""));
 	let updated = course;
 	if (graderChanged) {
 		const units = course.units.map((unit) => ({
@@ -437,19 +439,46 @@ const SAMPLE_INPUT = "8\n";
 function missingTool(tool: string, hint: string): RunResult {
 	return {
 		ok: false,
-		output: `${tool} is not installed on this machine — install it, or work on the problem in VS Code.`,
+		output: `${tool} is not installed on this machine — install it, or work on the problem in VS Code.${hint ? ` ${hint}` : ""}`,
 		command: tool,
 	};
 }
 
-/** The first file of a folder with one of these extensions. */
-function fileWith(folder: string, extensions: string[], fallback: string): string {
+/**
+ * The first source file of the problem's folder — or of one of its
+ * subfolders, because a course that hands its lab out in "lab01/" keeps
+ * the code there.
+ *
+ * The file's own folder comes with it: the program runs WHERE it lives (a
+ * lab's own imports and its data files are beside it).
+ */
+function fileWith(folder: string, extensions: string[], fallback: string): { file: string; dir: string } {
+	const found = findWithExtension(folder, extensions, 0);
+	if (!found) return { file: fallback, dir: folder };
+	return { file: path.basename(found), dir: path.dirname(found) };
+}
+
+/** The first file with one of these extensions, in the folder or a subfolder. */
+function findWithExtension(folder: string, extensions: string[], depth: number): string | null {
+	let entries: fs.Dirent[];
+	try {
+		entries = fs.readdirSync(folder, { withFileTypes: true });
+	} catch {
+		return null;
+	}
 	for (const extension of extensions) {
-		for (const name of fs.readdirSync(folder)) {
-			if (name.endsWith(extension)) return name;
+		for (const entry of entries) {
+			if (entry.isFile() && entry.name.endsWith(extension)) return path.join(folder, entry.name);
 		}
 	}
-	return fallback;
+	if (depth >= 3) return null;
+	for (const entry of entries) {
+		if (!entry.isDirectory()) continue;
+		if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "__pycache__") continue;
+		const found = findWithExtension(path.join(folder, entry.name), extensions, depth + 1);
+		if (found) return found;
+	}
+	return null;
 }
 
 /** Run the Run pane's step of a problem: build it, then run it.
@@ -467,23 +496,26 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 	const language = problem.language;
 
 	if (language === "c" || language === "cpp") {
-		const source = fileWith(folder, language === "c" ? [".c"] : [".cpp", ".cc", ".cxx"], language === "c" ? "main.c" : "main.cpp");
+		const { file: source, dir } = fileWith(folder, language === "c" ? [".c"] : [".cpp", ".cc", ".cxx"], language === "c" ? "main.c" : "main.cpp");
 		const target = source.replace(/\.(c|cpp|cc|cxx)$/, "");
-		const hasMakefile = fs.existsSync(path.join(folder, "Makefile"));
+		const hasMakefile = fs.existsSync(path.join(dir, "Makefile"));
 		const build = hasMakefile
-			? await runSandboxed("make", [], { cwd: folder, writable: [folder] })
+			? await runSandboxed("make", [], { cwd: dir, writable: [folder] })
 			: await runSandboxed(language === "c" ? "gcc" : "g++", [language === "c" ? "-std=c11" : "-std=c++17", "-O2", "-o", target, source], {
-					cwd: folder,
+					cwd: dir,
 					writable: [folder],
 				});
 		if (!build.ok) {
 			if (/failed to start|ENOENT/i.test(build.output)) {
-				return missingTool(language === "c" ? "gcc" : "g++", "");
+				return missingTool(
+					language === "c" ? "gcc" : "g++",
+					"A C/C++ compiler builds the program (Debian/Ubuntu: `sudo apt install build-essential`; macOS: the Xcode command line tools).",
+				);
 			}
 			return { ...build, command: hasMakefile ? `make (${target})` : `${language === "c" ? "gcc" : "g++"} ${source}` };
 		}
 		const run = await runSandboxed(`./${target}`, [], {
-			cwd: folder,
+			cwd: dir,
 			writable: [folder],
 			timeoutMs: 20_000,
 			keepStdinOpen: true,
@@ -492,9 +524,9 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		return { ...run, output: `${build.output}\n${run.output}`, command: `${hasMakefile ? "make" : language === "c" ? "gcc" : "g++"} && ./${target}` };
 	}
 	if (language === "python") {
-		const file = fileWith(folder, [".py"], "main.py");
+		const { file, dir } = fileWith(folder, [".py"], "main.py");
 		return runSandboxed("python3", [file], {
-			cwd: folder,
+			cwd: dir,
 			writable: [folder],
 			timeoutMs: 20_000,
 			keepStdinOpen: true,
@@ -502,9 +534,9 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		});
 	}
 	if (language === "javascript") {
-		const file = fileWith(folder, [".js", ".mjs", ".cjs"], "main.js");
+		const { file, dir } = fileWith(folder, [".js", ".mjs", ".cjs"], "main.js");
 		return runSandboxed("node", [file], {
-			cwd: folder,
+			cwd: dir,
 			writable: [folder],
 			timeoutMs: 20_000,
 			keepStdinOpen: true,
@@ -512,11 +544,11 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		});
 	}
 	if (language === "typescript") {
-		const file = fileWith(folder, [".ts", ".tsx"], "main.ts");
+		const { file, dir } = fileWith(folder, [".ts", ".tsx"], "main.ts");
 		// Node strips the types itself (22.6+); tsx is the fallback for the
 		// boxes whose node is older.
 		const result = await runSandboxed("node", [file], {
-			cwd: folder,
+			cwd: dir,
 			writable: [folder],
 			timeoutMs: 20_000,
 			keepStdinOpen: true,
@@ -524,7 +556,7 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		});
 		if (!result.ok && /unknown file extension|Cannot strip|ERR_UNKNOWN_FILE_EXTENSION/i.test(result.output)) {
 			return runSandboxed("npx", ["--yes", "tsx", file], {
-				cwd: folder,
+				cwd: dir,
 				writable: [folder],
 				timeoutMs: 60_000,
 				keepStdinOpen: true,
@@ -534,9 +566,9 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		return result;
 	}
 	if (language === "sql") {
-		const file = fileWith(folder, [".sql"], "main.sql");
-		const sql = fs.readFileSync(path.join(folder, file), "utf-8");
-		const result = await runSandboxed("sqlite3", [":memory:"], { cwd: folder, writable: [folder], timeoutMs: 20_000, input: sql });
+		const { file, dir } = fileWith(folder, [".sql"], "main.sql");
+		const sql = fs.readFileSync(path.join(dir, file), "utf-8");
+		const result = await runSandboxed("sqlite3", [":memory:"], { cwd: dir, writable: [folder], timeoutMs: 20_000, input: sql });
 		if (!result.ok && /failed to start|ENOENT/i.test(result.output)) {
 			return {
 				ok: false,
@@ -547,9 +579,9 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		return result;
 	}
 	if (language === "go") {
-		const file = fileWith(folder, [".go"], "main.go");
+		const { file, dir } = fileWith(folder, [".go"], "main.go");
 		return runSandboxed("go", ["run", file], {
-			cwd: folder,
+			cwd: dir,
 			writable: [folder],
 			timeoutMs: 60_000,
 			keepStdinOpen: true,
@@ -557,15 +589,15 @@ export async function runProblem(course: Course, problem: CourseProblem): Promis
 		});
 	}
 	if (language === "rust") {
-		const file = fileWith(folder, [".rs"], "main.rs");
+		const { file, dir } = fileWith(folder, [".rs"], "main.rs");
 		const target = "main-rust";
-		const build = await runSandboxed("rustc", ["-O", "-o", target, file], { cwd: folder, writable: [folder] });
+		const build = await runSandboxed("rustc", ["-O", "-o", target, file], { cwd: dir, writable: [folder] });
 		if (!build.ok) {
-			if (/failed to start|ENOENT/i.test(build.output)) return missingTool("rustc", "");
+			if (/failed to start|ENOENT/i.test(build.output)) return missingTool("rustc", "Rust's compiler builds the program (install it from https://rustup.rs).");
 			return { ...build, command: `rustc ${file}` };
 		}
 		const run = await runSandboxed(`./${target}`, [], {
-			cwd: folder,
+			cwd: dir,
 			writable: [folder],
 			timeoutMs: 20_000,
 			keepStdinOpen: true,

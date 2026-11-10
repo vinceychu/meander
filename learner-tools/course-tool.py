@@ -19,6 +19,16 @@ suite (pytest / npm test / make test / cargo test / go test) is graded with
 that, and a problem with no grader at all is reported as such — the tutor
 reviews it inside Meander.
 
+THE SANDBOX: the course's OWN code — its test suite, its `ok` client —
+runs inside the same sandbox the app's Check button uses (the plan in
+core/cli-tools.ts): the filesystem is read-only except the problem's own
+folder, and there is no network. A course's `.env` may only set the import
+paths a vendored test suite needs (PYTHONPATH, NODE_PATH) — never PATH,
+never LD_PRELOAD: a course's files are DATA, and data does not get to
+change how the grader runs. The learner's own check50 is NOT run this way:
+it fetches its checks over the network, and it is the learner's own
+installed tool.
+
 Academic honesty: this tool NEVER submits. `submit-info` only prints the
 command the learner runs himself.
 
@@ -40,6 +50,11 @@ ALLOWED = {"list", "start", "task", "check", "style", "submit-info", "doctor", "
 HOME = pathlib.Path(os.path.expanduser("~"))
 ENV_FILE = HOME / ".config" / "meander" / "cs50" / "env"
 SHIM_DIR = HOME / ".local" / "share" / "meander" / "cs50" / "bin"
+
+# The variables a course's own `.env` may set: the import paths a vendored
+# test suite needs, and nothing else. Same allowlist as the app's
+# (src/server/toolchain.ts).
+COURSE_ENV_ALLOWLIST = {"NODE_PATH", "PYTHONPATH"}
 
 
 def workspace_root() -> pathlib.Path:
@@ -180,10 +195,14 @@ def run(cmd: list, cwd=None, timeout=600, env=None) -> subprocess.CompletedProce
 
 
 def read_env_file(folder: pathlib.Path) -> dict:
-    """The variables a course's own `.env` file sets.
+    """The variables a course's own `.env` file may set.
 
     CS61A's lab sets `PYTHONPATH=.grader` so the pytest it vendors is
-    importable — without it the course's own test suite cannot even start."""
+    importable — without it the course's own test suite cannot even start.
+
+    Only the ALLOWLISTED keys are read: a course's `.env` is data the
+    course shipped, and data must not be able to change how the grader
+    runs (no PATH, no LD_PRELOAD, no LD_LIBRARY_PATH)."""
     out = {}
     try:
         text = (folder / ".env").read_text()
@@ -198,9 +217,36 @@ def read_env_file(folder: pathlib.Path) -> dict:
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
-        if key:
+        if key in COURSE_ENV_ALLOWLIST:
             out[key] = value
     return out
+
+
+def sandbox_plan(platform: str, command: str, args: list, writable: list, cwd: str):
+    """The confinement the app's Check button uses (core/cli-tools.ts).
+
+    The course's OWN code runs inside it: the filesystem is read-only
+    except the problem's folder, and there is no network. Returns the argv
+    to run, or None when this platform has no sandbox (the caller then
+    refuses to run — a sandbox that is missing is reported, never
+    bypassed)."""
+    if platform == "linux":
+        argv = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"]
+        for directory in writable:
+            argv += ["--bind", directory, directory]
+        argv += ["--unshare-all", "--die-with-parent", "--new-session", "--chdir", cwd, "--", command, *args]
+        return argv
+    if platform == "darwin":
+        subs = " ".join(f'(subpath {json.dumps(d)})' for d in [*writable, "/private/tmp", "/private/var/folders"])
+        profile = (
+            "(version 1)"
+            "(allow default)"
+            "(deny network*)"
+            "(deny file-write*)"
+            f'(allow file-write* {subs} (literal "/dev/null") (literal "/dev/tty"))'
+        )
+        return ["/usr/bin/sandbox-exec", "-p", profile, command, *args]
+    return None
 
 
 def cmd_list() -> int:
@@ -426,6 +472,9 @@ def cmd_check(name: str) -> int:
         # method (forkserver) breaks its worker handoff, so force 'fork'.
         # The JSON output is the machine-readable one: the plain output is a
         # picture of a smiley, which no coach can read.
+        # check50 is NOT sandboxed: it fetches its checks over the network,
+        # and it is the learner's own installed tool (Harvard's), not code
+        # a course handed out.
         code = (
             "import multiprocessing,sys,runpy;"
             "multiprocessing.set_start_method('fork',force=True);"
@@ -461,14 +510,28 @@ def cmd_check(name: str) -> int:
         # The grader runs where the course's code lives (a course that hands
         # its lab out in a subfolder grades inside it), with the course's own
         # environment (its `.env` sets the PYTHONPATH its vendored pytest
-        # needs).
+        # needs — and nothing else, see the allowlist).
         work_dir = directory
         sub = str(problem.get("graderWorkDir", "")).strip().strip("/")
         if sub and (directory / sub).is_dir():
             work_dir = directory / sub
         env = load_env()
         env.update(read_env_file(work_dir))
-        result = run(argv, cwd=str(work_dir), env=env)
+        # The course's OWN code runs inside the SAME sandbox the app's Check
+        # button uses (core/cli-tools.ts `sandboxedCommand`): no network, and
+        # the filesystem read-only except the problem's own folder.
+        plan = sandbox_plan(sys.platform, argv[0], argv[1:], [str(directory)], str(work_dir))
+        if plan is None:
+            print(f"not run: no sandbox is available on {sys.platform} — the course's own code runs sandboxed.")
+            return 1
+        try:
+            result = run(plan, cwd=str(work_dir), env=env)
+        except (FileNotFoundError, NotADirectoryError):
+            print(
+                "not run: the sandbox launcher is missing — install bubblewrap on Linux "
+                "(or run the problem in VS Code instead)."
+            )
+            return 1
         output = strip_ansi((result.stdout or "") + (result.stderr or ""))
         print(format_test_output(output, result.returncode))
         return 0 if result.returncode == 0 else 1

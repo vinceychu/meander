@@ -70,12 +70,21 @@ export interface RunResult {
 }
 
 /**
- * The variables a course's own `.env` file sets.
+ * The variables a course's own `.env` file may set.
  *
  * Courses ship these: CS61A's lab sets `PYTHONPATH=.grader` so the pytest
  * it vendors is importable. The grader runs with them, or the course's
  * own test suite cannot even start.
+ *
+ * The ALLOWLIST is the point: a course's `.env` is DATA the course
+ * shipped, and data must not be able to change how the grader runs — no
+ * PATH, no LD_PRELOAD, no LD_LIBRARY_PATH. Only the import paths a
+ * vendored test suite needs are read. (The learner tool reads the same
+ * list: learner-tools/course-tool.py.)
  */
+export const COURSE_ENV_ALLOWLIST: readonly string[] = ["NODE_PATH", "PYTHONPATH"];
+
+/** The variables a course's own `.env` file sets (the allowlisted ones). */
 export function readEnvFile(folder: string): Record<string, string> {
 	const out: Record<string, string> = {};
 	let text: string;
@@ -93,7 +102,7 @@ export function readEnvFile(folder: string): Record<string, string> {
 		if (value.length >= 2 && value[0] === value[value.length - 1] && (value[0] === '"' || value[0] === "'")) {
 			value = value.slice(1, -1);
 		}
-		if (key) out[key] = value;
+		if (COURSE_ENV_ALLOWLIST.includes(key)) out[key] = value;
 	}
 	return out;
 }

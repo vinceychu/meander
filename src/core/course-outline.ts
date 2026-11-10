@@ -21,7 +21,7 @@
  */
 
 import { Type } from "typebox";
-import { absoluteUrl } from "./course-parse.ts";
+import { absoluteUrl, htmlToText } from "./course-parse.ts";
 import type { CrawledPage } from "./course-crawl.ts";
 
 /** One video the model found (a lecture, a recording). */
@@ -144,6 +144,103 @@ export function normalizeUrl(url: string): string {
 	}
 }
 
+/**
+ * Is this reference a web page?
+ *
+ * A course's URL is often typed without its scheme ("cs61a.org"), and that
+ * is a URL — a learner pasting one means the course's site, not a course
+ * called "cs61a.org". A bare host (letters, digits, dots and dashes) with
+ * at least one dot is a URL; a name ("python", "CS50x") never is.
+ */
+export function isWebUrl(ref: string): boolean {
+	const trimmed = ref.trim();
+	if (!trimmed) return false;
+	if (/^https?:\/\//i.test(trimmed)) return true;
+	return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(\/[^\s]*)?$/i.test(trimmed);
+}
+
+/** A web page's URL, with its scheme (a bare host becomes https). */
+export function asWebUrl(ref: string): string {
+	const trimmed = ref.trim();
+	return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+/**
+ * The words that mark a page as a course's own page.
+ *
+ * A web search for a course's name also returns a forum thread about it,
+ * a Wikipedia entry, a blog post. Only the course's own site is the
+ * course — so the page that the search picks has to be CHECKED, not
+ * assumed.
+ */
+const COURSE_WORDS = [
+	"course",
+	"courses",
+	"coursework",
+	"syllabus",
+	"curriculum",
+	"schedule",
+	"week",
+	"weeks",
+	"module",
+	"modules",
+	"lecture",
+	"lectures",
+	"assignment",
+	"assignments",
+	"homework",
+	"homeworks",
+	"lab",
+	"labs",
+	"pset",
+	"psets",
+	"project",
+	"projects",
+	"readings",
+	"student",
+	"students",
+	"instructor",
+	"instructors",
+	"professor",
+	"credits",
+	"exams",
+];
+
+/** The words that are enough on their own. */
+const STRONG_COURSE_WORDS = new Set([
+	"course",
+	"courses",
+	"coursework",
+	"syllabus",
+	"curriculum",
+	"assignments",
+	"homework",
+]);
+
+/**
+ * Does this page look like a course's own page?
+ *
+ * The page is READ, not guessed at: a course's page says "course",
+ * "syllabus", "assignments" (and links to them). A page that says none of
+ * that is not the course — the search moves on to the next hit.
+ */
+export function looksLikeCoursePage(html: string): boolean {
+	const words = new Set(
+		htmlToText(html)
+			.slice(0, 20_000)
+			.toLowerCase()
+			.match(/[a-z]+/g) ?? [],
+	);
+	let hits = 0;
+	let strong = false;
+	for (const word of COURSE_WORDS) {
+		if (!words.has(word)) continue;
+		hits++;
+		if (STRONG_COURSE_WORDS.has(word)) strong = true;
+	}
+	return hits >= 2 || (hits >= 1 && strong);
+}
+
 /** The allowed-URL set, normalized. */
 export function allowedUrlSet(urls: readonly string[]): Set<string> {
 	return new Set(urls.map((url) => normalizeUrl(url)));
@@ -152,7 +249,7 @@ export function allowedUrlSet(urls: readonly string[]): Set<string> {
 /** Every URL the draft mentions (the ones the law applies to). */
 export function draftUrls(draft: OutlineDraft): Array<{ where: string; url: string }> {
 	const out: Array<{ where: string; url: string }> = [];
-	for (const [index, unit] of draft.units.entries()) {
+	for (const unit of draft.units) {
 		if (unit.pageUrl) out.push({ where: `unit "${unit.title}" pageUrl`, url: unit.pageUrl });
 		for (const url of unit.notesUrls ?? []) out.push({ where: `unit "${unit.title}" notes`, url });
 		for (const video of unit.videos ?? []) {
@@ -163,7 +260,6 @@ export function draftUrls(draft: OutlineDraft): Array<{ where: string; url: stri
 			if (problem.starterUrl) out.push({ where: `problem "${problem.title}" starterUrl`, url: problem.starterUrl });
 			if (problem.repoUrl) out.push({ where: `problem "${problem.title}" repoUrl`, url: problem.repoUrl });
 		}
-		void index;
 	}
 	return out;
 }
@@ -179,6 +275,76 @@ export function findInventedUrls(draft: OutlineDraft, allowed: Set<string>): str
 		problems.push(`${where}: "${url}" was not on any page the crawl read — invented URLs are rejected.`);
 	}
 	return problems;
+}
+
+/**
+ * The URL law, applied as a DROP: the URLs the crawl never saw are taken
+ * out of the draft, and the rest of the outline is kept.
+ *
+ * An invented URL is the model's mistake, not a reason to throw the whole
+ * course away: a course with one bad link in one assignment page must
+ * still be teachable. The invented URL never reaches the course plan —
+ * the field it was in is simply left out.
+ *
+ * A problem whose SPEC page was invented goes with it: there is no
+ * assignment to read. Returns the cleaned draft and the URLs that were
+ * dropped (named, so the app can say what it left out).
+ */
+export function stripInventedUrls(draft: OutlineDraft, allowed: Set<string>): { draft: OutlineDraft; dropped: string[] } {
+	const dropped: string[] = [];
+	const seen = (url: string): string | undefined => {
+		if (allowed.has(normalizeUrl(url))) return url;
+		dropped.push(url);
+		return undefined;
+	};
+	const units: OutlineUnitDraft[] = [];
+	for (const unit of draft.units) {
+		const pageUrl = unit.pageUrl ? seen(unit.pageUrl) : undefined;
+		const notesUrls = unit.notesUrls?.map((url) => seen(url)).filter((url): url is string => url !== undefined);
+		const videos = unit.videos?.map((video) => {
+			if (!video.url) {
+				return {
+					title: video.title,
+					...(video.youtubeId !== undefined ? { youtubeId: video.youtubeId } : {}),
+					...(video.startSeconds !== undefined ? { startSeconds: video.startSeconds } : {}),
+				};
+			}
+			const url = seen(video.url);
+			// An invented video URL is dropped; the video itself stays (the
+			// id it carries is not a URL, so the law does not judge it).
+			return {
+				title: video.title,
+				...(url !== undefined ? { url } : {}),
+				...(video.youtubeId !== undefined ? { youtubeId: video.youtubeId } : {}),
+				...(video.startSeconds !== undefined ? { startSeconds: video.startSeconds } : {}),
+			};
+		});
+		const problems: OutlineProblemDraft[] = [];
+		for (const problem of unit.problems ?? []) {
+			const specUrl = problem.specUrl ? seen(problem.specUrl) : undefined;
+			// A problem whose spec page was invented is dropped with it.
+			if (problem.specUrl && !specUrl) continue;
+			const starterUrl = problem.starterUrl ? seen(problem.starterUrl) : undefined;
+			const repoUrl = problem.repoUrl ? seen(problem.repoUrl) : undefined;
+			problems.push({
+				...(problem.id !== undefined ? { id: problem.id } : {}),
+				title: problem.title,
+				...(specUrl !== undefined ? { specUrl } : {}),
+				...(starterUrl !== undefined ? { starterUrl } : {}),
+				...(repoUrl !== undefined ? { repoUrl } : {}),
+				...(problem.language !== undefined ? { language: problem.language } : {}),
+				...(problem.grader !== undefined ? { grader: problem.grader } : {}),
+			});
+		}
+		units.push({
+			...unit,
+			...(pageUrl !== undefined ? { pageUrl } : {}),
+			...(notesUrls !== undefined ? { notesUrls } : {}),
+			...(videos !== undefined ? { videos } : {}),
+			...(unit.problems !== undefined ? { problems } : {}),
+		});
+	}
+	return { draft: { title: draft.title, units }, dropped };
 }
 
 // ─── the timestamp law ──────────────────────────────────────────────────────
@@ -368,15 +534,21 @@ export type OutlineModel = (prompt: string) => Promise<string>;
 
 /** What an extraction produced. */
 export type OutlineExtraction =
-	| { ok: true; draft: OutlineDraft }
+	| { ok: true; draft: OutlineDraft; dropped: string[] }
 	| { ok: false; problems: string[] };
 
 /**
  * Extract the outline from the crawled pages.
  *
  * The URL law is applied here: every URL the model wrote must be one the
- * crawl saw. A model that invents a plausible URL is rejected, and the
- * rejection says which URL — the caller can then ask for a re-read.
+ * crawl saw. A URL that was invented is DROPPED (the field it was in is
+ * left out, and a problem whose spec page was invented goes with it) —
+ * the rest of the course is kept, because one bad link must not cost the
+ * learner the whole course. The dropped URLs are named in the result, so
+ * the app can say what it left out.
+ *
+ * An answer with no units at all is not a course: that IS a failure, and
+ * it is reported as one.
  */
 export async function extractOutline(
 	pages: CrawledPage[],
@@ -394,7 +566,15 @@ export async function extractOutline(
 	if (!draft) return { ok: false, problems: ["the model did not answer with a course outline"] };
 	const base = pages[0]?.url ?? "";
 	const resolved = resolveDraftUrls(draft, base);
-	const problems = findInventedUrls(resolved, allowedUrlSet(allowedUrls));
-	if (problems.length > 0) return { ok: false, problems };
-	return { ok: true, draft: resolved };
+	const { draft: clean, dropped } = stripInventedUrls(resolved, allowedUrlSet(allowedUrls));
+	if (clean.units.length === 0) {
+		return {
+			ok: false,
+			problems: [
+				"the course's outline named no units",
+				...dropped.map((url) => `"${url}" was not on any page the crawl read — invented URLs are rejected.`),
+			],
+		};
+	}
+	return { ok: true, draft: clean, dropped };
 }

@@ -1,17 +1,19 @@
 /**
  * THE COURSE ADAPTERS (2026-11-09) — "learn ANY course".
  *
- * Three laws are pinned here, and they are the point of the seam:
+ * Four laws are pinned here, and they are the point of the seam:
  *
  *   1. DETECTION — a reference names one adapter: the CS50 family for the
  *      CS50 courses (by id, by title, by their own URL), the generic
  *      adapter for every other course page.
  *   2. THE URL LAW — every URL in an extracted outline must be one the
  *      crawl SAW. A model that invents "https://example.edu/labs/lab99.html"
- *      is rejected, and the rejection names the URL.
+ *      has that URL DROPPED — the course is kept, the invented link is not.
  *   3. THE GRADER — a course's own grader is preferred over anything else
  *      (`ok` first, then the test suite), and a course that ships none says
  *      so instead of faking a check.
+ *   4. THE STARTER — the course's own archive and repository are unpacked
+ *      and cloned, and neither ever overwrites or deletes the learner's work.
  *
  * The CS50 fixtures are trimmed copies of the real pages (fetched
  * 2026-11-09); the generic course is a hand-written fake site (see
@@ -19,17 +21,24 @@
  */
 
 import assert from "node:assert/strict";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
+import * as http from "node:http";
+import type { AddressInfo } from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
+import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type Context } from "@earendil-works/pi-ai";
 import { parseProblemSetPage, parseSpecPage, parseUnitIndex, parseUnitPage } from "../src/core/course-parse.ts";
 import { detectGrader, checksToLines, parseTestOutput, summaryLine } from "../src/core/course-graders.ts";
 import { graderLabel, graderOf } from "../src/core/course-adapters.ts";
+import type { CrawledPage } from "../src/core/course-crawl.ts";
+import { asWebUrl, extractOutline, isWebUrl, looksLikeCoursePage } from "../src/core/course-outline.ts";
 import type { CourseRequest } from "../src/core/courses.ts";
-import { adapterFor, resolveCourseRef } from "../src/server/course-adapters/index.ts";
-import { cs50Adapter, cs50CourseFor, problemIdFromPath } from "../src/server/course-adapters/cs50.ts";
-import { createGenericAdapter, courseIdForUrl, genericAdapter } from "../src/server/course-adapters/generic.ts";
+import { adapterFor, findCoursePage, resolveCourseRef } from "../src/server/course-adapters/index.ts";
+import { cs50Adapter, cs50CourseFor, looseCs50Course, problemIdFromPath } from "../src/server/course-adapters/cs50.ts";
+import { createGenericAdapter, courseIdForUrl, genericAdapter, outlineAnswer } from "../src/server/course-adapters/generic.ts";
+import { cloneRepository } from "../src/server/course-adapters/starter.ts";
 
 const FIXTURES = path.join(import.meta.dirname, "fixtures");
 const read = (name: string) => fs.readFileSync(path.join(FIXTURES, name), "utf-8");
@@ -240,7 +249,7 @@ describe("the generic adapter reads a course nobody wrote an adapter for", () =>
 		}
 	});
 
-	it("REJECTS an invented URL — the model cannot make one up", async () => {
+	it("DROPS an invented URL — and keeps the course", async () => {
 		const inventing = {
 			title: "Introduction to Widgets",
 			units: [
@@ -256,13 +265,16 @@ describe("the generic adapter reads a course nobody wrote an adapter for", () =>
 			],
 		};
 		const adapter = createGenericAdapter({ model: modelAnswering(inventing), fetch: fakeFetch });
-		await assert.rejects(
-			() => adapter.outline(REQUEST),
-			/lab99\.html[\s\S]*invented URLs are rejected/,
+		const outline = await adapter.outline(REQUEST);
+		assert.equal(outline.units.length, 1, "one invented link must not cost the learner the course");
+		assert.deepEqual(
+			outline.units[0]!.problems,
+			[],
+			"the problem whose spec page was invented went with it",
 		);
 	});
 
-	it("REJECTS an invented notes URL too", async () => {
+	it("DROPS an invented notes URL too", async () => {
 		const inventing = {
 			title: "Introduction to Widgets",
 			units: [
@@ -273,7 +285,29 @@ describe("the generic adapter reads a course nobody wrote an adapter for", () =>
 			],
 		};
 		const adapter = createGenericAdapter({ model: modelAnswering(inventing), fetch: fakeFetch });
-		await assert.rejects(() => adapter.outline(REQUEST), /invented URLs are rejected/);
+		const outline = await adapter.outline(REQUEST);
+		assert.equal(outline.units.length, 1);
+		assert.equal(outline.units[0]!.notesUrl, "", "the invented notes page is not in the course");
+	});
+
+	it("keeps the problems the crawl really saw", async () => {
+		const mixed = {
+			title: "Introduction to Widgets",
+			units: [
+				{
+					title: "Unit 1: Widgets",
+					problems: [
+						{ title: "Lab 1: Widgets", specUrl: "https://example.edu/course/labs/lab01.html" },
+						{ title: "Lab 99: Ghosts", specUrl: "https://example.edu/course/labs/lab99.html" },
+					],
+				},
+			],
+		};
+		const adapter = createGenericAdapter({ model: modelAnswering(mixed), fetch: fakeFetch });
+		const outline = await adapter.outline(REQUEST);
+		const problems = outline.units[0]!.problems;
+		assert.equal(problems.length, 1);
+		assert.equal(problems[0]!.title, "Lab 1: Widgets");
 	});
 
 	it("says so when the model's answer is not an outline at all", async () => {
@@ -410,5 +444,341 @@ describe("reading a test runner's output", () => {
 		assert.equal(checks.length, 1);
 		assert.equal(checks[0]?.ok, false);
 		assert.match(checks[0]?.cause ?? "", /assert 1 == 2/);
+	});
+});
+
+// ─── 5. the URL law, at the seam ────────────────────────────────────────────
+
+describe("the URL law, applied as a drop", () => {
+	const PAGE: CrawledPage = {
+		url: "https://example.edu/course/",
+		title: "Introduction to Widgets",
+		text: "A course about widgets.",
+		markdown: "A course about widgets.",
+		links: [],
+	};
+
+	it("keeps the course when one URL was invented", async () => {
+		const draft = {
+			title: "Introduction to Widgets",
+			units: [
+				{
+					title: "Unit 1: Widgets",
+					pageUrl: "https://example.edu/course/",
+					problems: [
+						{ title: "Lab 1", specUrl: "https://example.edu/course/labs/lab01.html" },
+						{ title: "Lab 99", specUrl: "https://example.edu/course/labs/lab99.html" },
+					],
+				},
+			],
+		};
+		const extraction = await extractOutline(
+			[PAGE],
+			["https://example.edu/course/", "https://example.edu/course/labs/lab01.html"],
+			() => Promise.resolve(JSON.stringify(draft)),
+		);
+		assert.equal(extraction.ok, true);
+		if (!extraction.ok) return;
+		assert.deepEqual(extraction.dropped, ["https://example.edu/course/labs/lab99.html"]);
+		assert.equal(extraction.draft.units[0]!.problems?.length, 1, "the invented problem went with its URL");
+		assert.equal(extraction.draft.units[0]!.problems?.[0]?.title, "Lab 1");
+	});
+
+	it("fails only when there is nothing left to teach", async () => {
+		const extraction = await extractOutline([PAGE], [], () =>
+			Promise.resolve(JSON.stringify({ title: "Nothing", units: [] })),
+		);
+		assert.equal(extraction.ok, false);
+		if (extraction.ok) return;
+		assert.match(extraction.problems.join("\n"), /named no units/);
+	});
+
+	it("knows a web page from a name, with or without its scheme", () => {
+		assert.equal(isWebUrl("https://cs61a.org/"), true);
+		assert.equal(isWebUrl("cs61a.org"), true);
+		assert.equal(isWebUrl("cs61a.org/sp/"), true);
+		assert.equal(asWebUrl("cs61a.org"), "https://cs61a.org");
+		assert.equal(isWebUrl("python"), false, "a name is not a URL");
+		assert.equal(isWebUrl("CS50x"), false);
+	});
+
+	it("knows a course's own page from a forum thread about it", () => {
+		const course = "<html><body><h1>CS61A</h1><p>Course schedule, labs and the syllabus.</p></body></html>";
+		const thread = "<html><body><p>Anyone tried the new assignment yet? I got stuck on question 3.</p></body></html>";
+		assert.equal(looksLikeCoursePage(course), true);
+		assert.equal(looksLikeCoursePage(thread), false);
+	});
+});
+
+// ─── 5b. the prompt the model is asked with ─────────────────────────────────
+
+describe("the outline the model is asked for", () => {
+	it("gives the model the LAWS, not just the pages", async () => {
+		const faux = fauxProvider();
+		faux.setResponses([
+			fauxAssistantMessage(
+				[fauxToolCall("submit_outline", { title: "A course", units: [] })],
+				{ stopReason: "toolUse" },
+			),
+		]);
+		const models = createModels();
+		models.setProvider(faux.provider);
+		const seen: Context["messages"] = [];
+		const engine = {
+			model: faux.getModel(),
+			streamFn: (model: never, context: Context, options: never) => {
+				seen.push(...context.messages);
+				return models.streamSimple(model, context, options);
+			},
+		};
+		const answer = await outlineAnswer(engine as never, "THESE ARE THE PAGES");
+		// The system prompt carries the laws — without them the model answers
+		// with whatever shape the pages happen to show (a schedule), and the
+		// course comes out with no problems at all.
+		const system = seen.find((message) => message.role === "system");
+		assert.ok(system, "the model got a system prompt");
+		const laws = JSON.stringify(system.content);
+		assert.match(laws, /Use ONLY URLs that appear in the pages/);
+		assert.match(laws, /The problems are the assignments/);
+		// The pages themselves travel as the user message.
+		assert.match(JSON.stringify(seen.find((message) => message.role === "user")?.content), /THESE ARE THE PAGES/);
+		// The submitted outline comes back as the JSON the extractor reads.
+		assert.deepEqual(JSON.parse(answer), { title: "A course", units: [] });
+	});
+});
+
+// ─── 6. the reference a learner gives ───────────────────────────────────────
+
+describe("the reference a learner gives", () => {
+	it("takes the course's own page, with or without its scheme", async () => {
+		const withScheme = await resolveCourseRef("https://cs61a.org/", { provider: null });
+		const without = await resolveCourseRef("cs61a.org", { provider: null });
+		assert.equal(without.source, "https://cs61a.org");
+		assert.equal(without.ref, "https://cs61a.org", "the ref is something the registry can route");
+		assert.equal(without.adapter, "generic");
+		assert.equal(without.courseId, withScheme.courseId);
+		assert.equal(adapterFor("cs61a.org").id, "generic");
+	});
+
+	it("finds the CS50 course a loose name points at", async () => {
+		const python = await resolveCourseRef("cs50 python", { provider: null });
+		assert.equal(python.courseId, "cs50p");
+		assert.equal(python.adapter, "cs50");
+		assert.equal(python.ref, "cs50p");
+		const web = await resolveCourseRef("cs50 web programming", { provider: null });
+		assert.equal(web.courseId, "cs50w");
+		const flagship = await resolveCourseRef("cs50", { provider: null });
+		assert.equal(flagship.courseId, "cs50x");
+	});
+
+	it("needs a REAL match — a bare language is not a course", async () => {
+		// "python" names a language, not a course: it must not land on
+		// CS50's Python course by accident.
+		assert.equal(looseCs50Course("python"), null);
+		assert.equal(looseCs50Course("c"), null);
+		await assert.rejects(() => resolveCourseRef("python", { provider: null }), /Paste the course's URL/);
+	});
+
+	it("does not guess when two courses fit the name equally well", async () => {
+		assert.equal(looseCs50Course("cs50 python javascript"), null);
+	});
+
+	it("checks that the search result really is a course's own page", async () => {
+		const provider = {
+			id: "brave" as const,
+			search: () =>
+				Promise.resolve([
+					{ title: "A thread", url: "https://forum.example.edu/thread/123", snippet: "" },
+					{ title: "CS61A", url: "https://cs61a.org/", snippet: "" },
+				]),
+		};
+		const pages: Record<string, string> = {
+			"https://forum.example.edu/thread/123": "<html><body>Anyone tried the new assignment yet?</body></html>",
+			"https://cs61a.org/": "<html><body><h1>CS61A</h1><p>Course schedule, labs, syllabus.</p></body></html>",
+		};
+		const read = (url: string): Promise<string> =>
+			pages[url] ? Promise.resolve(pages[url]!) : Promise.reject(new Error("404"));
+		const page = await findCoursePage("the structure and interpretation of computer programs", { provider, fetch: read });
+		assert.equal(page, "https://cs61a.org/", "the forum thread is not the course");
+		const resolved = await resolveCourseRef("the structure and interpretation of computer programs", { provider, fetch: read });
+		assert.equal(resolved.source, "https://cs61a.org/");
+		assert.equal(resolved.ref, "https://cs61a.org/");
+		assert.equal(resolved.adapter, "generic");
+	});
+
+	it("says so when no search engine can find the course", async () => {
+		await assert.rejects(() => resolveCourseRef("a course nobody has heard of", { provider: null }), /Paste the course's URL/);
+	});
+});
+
+// ─── 7. the starter code: the course's archive and repository ───────────────
+
+describe("the starter archive the course hands out", () => {
+	/** A course archive, served over HTTP (the app fetches it). */
+	async function serveArchive(files: Record<string, string>): Promise<{ url: string; close: () => Promise<void> }> {
+		const source = fs.mkdtempSync(path.join(os.tmpdir(), "lh-archive-src-"));
+		for (const [name, content] of Object.entries(files)) {
+			const target = path.join(source, name);
+			fs.mkdirSync(path.dirname(target), { recursive: true });
+			fs.writeFileSync(target, content, "utf-8");
+		}
+		const archive = path.join(source, "..", `starter-${path.basename(source)}.tar.gz`);
+		execFileSync("tar", ["-czf", archive, "-C", source, "."]);
+		const server = http.createServer((req, res) => {
+			if (req.url !== "/starter.tar.gz") {
+				res.writeHead(404).end();
+				return;
+			}
+			res.writeHead(200, { "content-type": "application/gzip" });
+			fs.createReadStream(archive).pipe(res);
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const port = (server.address() as AddressInfo).port;
+		return {
+			url: `http://127.0.0.1:${port}/starter.tar.gz`,
+			close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+		};
+	}
+
+	it("unpacks the CS50 course's archive and NEVER overwrites the learner's work", async () => {
+		const archive = await serveArchive({
+			"hello.py": "print('the starter')\n",
+			"data/notes.txt": "the course's own notes\n",
+		});
+		try {
+			const folder = fs.mkdtempSync(path.join(os.tmpdir(), "lh-cs50-prep-"));
+			const problem = {
+				id: "hello",
+				unitId: "unit-1",
+				title: "Hello",
+				slug: "",
+				specUrl: "https://cs50.harvard.edu/x/psets/0/hello/",
+				variant: "standard" as const,
+				language: "python" as const,
+				distributionUrls: [archive.url],
+				files: [{ name: "README.md", content: "# Hello\n", language: "text" as const }],
+				estimateMinutes: 45,
+			};
+			const request: CourseRequest = {
+				courseId: "cs50x",
+				ref: "cs50x",
+				source: "https://cs50.harvard.edu/x/",
+				title: "CS50x",
+			};
+			// The first prepare: the archive is unpacked.
+			const first = await cs50Adapter.prepare(request, problem, folder);
+			assert.deepEqual(new Set(first.created), new Set(["README.md", "hello.py", "data/notes.txt"]));
+			assert.equal(fs.readFileSync(path.join(folder, "hello.py"), "utf-8"), "print('the starter')\n");
+			assert.ok(fs.existsSync(path.join(folder, "data", "notes.txt")));
+
+			// The learner writes their own version…
+			fs.writeFileSync(path.join(folder, "hello.py"), "print('mine')\n", "utf-8");
+			// …and the second prepare (which happens on every view, run and
+			// check) must not put the starter back.
+			const second = await cs50Adapter.prepare(request, problem, folder);
+			assert.deepEqual(second.created, [], "the second prepare created nothing");
+			assert.equal(fs.readFileSync(path.join(folder, "hello.py"), "utf-8"), "print('mine')\n");
+		} finally {
+			await archive.close();
+		}
+	});
+});
+
+describe("the starter repository the course hands out", () => {
+	it("a FAILED clone leaves the folder exactly as it was", async () => {
+		const folder = fs.mkdtempSync(path.join(os.tmpdir(), "lh-clone-"));
+		fs.writeFileSync(path.join(folder, "my-work.py"), "print('mine')\n", "utf-8");
+		const created = await cloneRepository("https://127.0.0.1:1/nothing.git", folder);
+		assert.deepEqual(created, []);
+		assert.deepEqual(fs.readdirSync(folder), ["my-work.py"], "nothing was deleted and nothing was left behind");
+		assert.equal(fs.readFileSync(path.join(folder, "my-work.py"), "utf-8"), "print('mine')\n");
+	});
+
+	it("a folder that already holds the clone is left alone", async () => {
+		const folder = fs.mkdtempSync(path.join(os.tmpdir(), "lh-clone-"));
+		fs.mkdirSync(path.join(folder, ".git"));
+		fs.writeFileSync(path.join(folder, "lab01.py"), "print('mine')\n", "utf-8");
+		const created = await cloneRepository("https://example.edu/lab01.git", folder);
+		assert.deepEqual(created, []);
+		assert.ok(fs.existsSync(path.join(folder, ".git")), "the clone is still there");
+		assert.equal(fs.readFileSync(path.join(folder, "lab01.py"), "utf-8"), "print('mine')\n");
+	});
+
+	it("clones into its own folder when the problem's folder already has files", async () => {
+		// A course's own git server, on the machine (git http-backend speaks
+		// the smart HTTP protocol git clones over).
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-gitserver-"));
+		const work = path.join(root, "work");
+		fs.mkdirSync(work);
+		const git = (args: string[], cwd: string): void => {
+			execFileSync("git", args, {
+				cwd,
+				env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t.t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t.t" },
+				stdio: "ignore",
+			});
+		};
+		git(["init", "-q", work], root);
+		fs.writeFileSync(path.join(work, "lab01.py"), "print('the starter')\n", "utf-8");
+		git(["add", "-A"], work);
+		git(["commit", "-qm", "the lab"], work);
+		git(["clone", "-q", "--bare", work, path.join(root, "lab01.git")], root);
+
+		const server = http.createServer((req, res) => {
+			const backend = spawn("git", ["http-backend"], {
+				env: {
+					...process.env,
+					GIT_PROJECT_ROOT: root,
+					GIT_HTTP_EXPORT_ALL: "1",
+					REQUEST_METHOD: req.method ?? "GET",
+					PATH_INFO: (req.url ?? "/").split("?")[0],
+					QUERY_STRING: (req.url ?? "/").split("?")[1] ?? "",
+					CONTENT_TYPE: req.headers["content-type"] ?? "",
+					CONTENT_LENGTH: req.headers["content-length"] ?? "",
+					REMOTE_USER: "tester",
+					REMOTE_ADDR: "127.0.0.1",
+				},
+			});
+			const chunks: Buffer[] = [];
+			backend.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+			const body: Buffer[] = [];
+			req.on("data", (chunk: Buffer) => body.push(chunk));
+			req.on("end", () => {
+				backend.stdin.end(Buffer.concat(body));
+			});
+			backend.on("close", () => {
+				const out = Buffer.concat(chunks);
+				const split = out.indexOf("\r\n\r\n");
+				const head = out.subarray(0, split).toString();
+				const payload = out.subarray(split + 4);
+				for (const line of head.split("\r\n")) {
+					const index = line.indexOf(": ");
+					if (index > 0) res.setHeader(line.slice(0, index), line.slice(index + 2));
+				}
+				res.statusCode = 200;
+				res.end(payload);
+			});
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const port = (server.address() as AddressInfo).port;
+		try {
+			const folder = fs.mkdtempSync(path.join(os.tmpdir(), "lh-clone-"));
+			// The problem's folder already has the spec's README: the clone
+			// must land beside it, never on top of it.
+			fs.writeFileSync(path.join(folder, "README.md"), "# Lab 1\n", "utf-8");
+			const created = await cloneRepository(`http://127.0.0.1:${port}/lab01.git`, folder);
+			assert.ok(created.includes("starter/lab01.py"), created.join(", "));
+			assert.equal(fs.readFileSync(path.join(folder, "README.md"), "utf-8"), "# Lab 1\n");
+			assert.ok(fs.existsSync(path.join(folder, "starter", "lab01.py")));
+
+			// The learner works in the clone…
+			fs.writeFileSync(path.join(folder, "starter", "lab01.py"), "print('mine')\n", "utf-8");
+			// …and the second prepare does not clone again and does not
+			// delete what the learner wrote.
+			const second = await cloneRepository(`http://127.0.0.1:${port}/lab01.git`, folder);
+			assert.deepEqual(second, []);
+			assert.equal(fs.readFileSync(path.join(folder, "starter", "lab01.py"), "utf-8"), "print('mine')\n");
+		} finally {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
 	});
 });

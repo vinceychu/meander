@@ -25,8 +25,10 @@ import { crawlCourse, pagesForModel, type CrawledPage } from "../../core/course-
 import { detectGrader } from "../../core/course-graders.ts";
 import {
 	extractOutline,
+	isWebUrl,
 	normalizeGrader,
 	normalizeLanguage,
+	OUTLINE_SYSTEM_PROMPT,
 	outlineSchema,
 	resolveAgainst,
 	slugify,
@@ -38,6 +40,7 @@ import {
 import type { CourseAdapter, CourseGrade, CourseOutline, CourseRequest } from "../../core/course-adapters.ts";
 import { graderOf } from "../../core/course-adapters.ts";
 import { courseIdFor, type CourseProblem, type CourseUnit, type CourseVideoSegment } from "../../core/courses.ts";
+import type { PiEngine } from "../../agent/models.ts";
 import { fetchPage } from "../course-pages.ts";
 import { runCourseTool } from "../course-tool.ts";
 import { runCommandGrader, runRubricGrader } from "./grading.ts";
@@ -52,19 +55,23 @@ export interface GenericAdapterOptions {
 	fetch?: (courseId: string, url: string) => Promise<string>;
 }
 
-/** The model seam: the app's background extraction path (the cheap slot). */
-export async function defaultOutlineModel(prompt: string): Promise<string> {
-	const engine = engineForRole("extractor");
-	if (!engine) {
-		throw new Error("no model is configured for reading a course (settings → models → cheap slot)");
-	}
+/**
+ * The outline the model submits (the seam the tests drive).
+ *
+ * The LAWS the extraction runs under travel as the SYSTEM prompt: the URL
+ * law (only URLs the crawl saw) and "the problems are the assignments the
+ * course asks for". Without them the model answers with whatever shape
+ * the pages happen to show — a schedule, a table of lectures — and the
+ * course comes out with no problems at all.
+ */
+export async function outlineAnswer(engine: PiEngine, prompt: string): Promise<string> {
 	const draft = await runSubmitAgent({
 		role: "extractor",
 		toolName: "submit_outline",
 		toolDescription: "Submit the course outline extracted from the course's pages.",
 		parameters: outlineSchema,
 		fill: (input: unknown) => input as OutlineDraft,
-		systemPrompt: "",
+		systemPrompt: OUTLINE_SYSTEM_PROMPT,
 		prompt,
 		engine,
 		signal: undefined,
@@ -73,6 +80,15 @@ export async function defaultOutlineModel(prompt: string): Promise<string> {
 		maxTurns: 3,
 	});
 	return JSON.stringify(draft);
+}
+
+/** The model seam: the app's background extraction path (the cheap slot). */
+export async function defaultOutlineModel(prompt: string): Promise<string> {
+	const engine = engineForRole("extractor");
+	if (!engine) {
+		throw new Error("no model is configured for reading a course (settings → models → cheap slot)");
+	}
+	return outlineAnswer(engine, prompt);
 }
 
 /** The first paragraph of a page's text (a unit's summary, when the model gave none). */
@@ -133,7 +149,11 @@ function graderFor(draftGrader: string | undefined, specText: string): "check50"
 	if (/pytest/.test(text)) return "tests";
 	if (/npm (run )?test/.test(text)) return "tests";
 	if (/make test/.test(text)) return "tests";
-	return "ai-rubric";
+	// Nothing says how this problem is graded. Saying so is the honest
+	// answer: the course's own files may still give away a grader later
+	// (prepare records it), but until then this problem has NO autograder
+	// — it is not quietly promised an AI review either.
+	return "none";
 }
 
 /** Build the course's units from the extracted outline. */
@@ -232,7 +252,9 @@ export function createGenericAdapter(opts: GenericAdapterOptions = {}): CourseAd
 		id: "generic",
 
 		detect(ref: string): boolean {
-			return /^https?:\/\//i.test(ref.trim());
+			// Any web page is a course page — with or without its scheme
+			// ("cs61a.org" is a URL a learner pastes).
+			return isWebUrl(ref);
 		},
 
 		async outline(request: CourseRequest): Promise<CourseOutline> {
@@ -274,6 +296,11 @@ export function createGenericAdapter(opts: GenericAdapterOptions = {}): CourseAd
 			for (const file of problem.files) {
 				const target = path.join(folder, file.name);
 				if (fs.existsSync(target)) continue;
+				// A course that hands its lab out in a subfolder ("lab01/")
+				// names the file with its folder: the folder is made, and the
+				// file is written only when it is not there yet — the
+				// learner's file always wins.
+				fs.mkdirSync(path.dirname(target), { recursive: true });
 				fs.writeFileSync(target, file.content, "utf-8");
 				created.push(file.name);
 			}

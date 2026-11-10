@@ -143,6 +143,73 @@ export function cs50CourseFor(ref: string): Cs50Course | null {
 	return id ? cs50Course(id) : null;
 }
 
+/**
+ * The words that name each CS50 course inside the family ("cs50 python").
+ *
+ * The table is data, like the catalogue itself: a course is named by the
+ * words a learner would actually use for it, and by nothing else.
+ */
+const CS50_KEYWORDS: Record<string, string[]> = {
+	cs50x: ["cs50x", "x", "scratch"],
+	cs50p: ["cs50p", "python"],
+	cs50ai: ["cs50ai", "ai", "artificial"],
+	cs50w: ["cs50w", "web", "javascript", "django"],
+	cs50sql: ["cs50sql", "sql", "database", "databases"],
+	cs50r: ["cs50r", "r"],
+	cs50cyber: ["cs50cyber", "cybersecurity", "cyber"],
+};
+
+/** The words of a name ("CS50's Introduction to Python" → …). */
+function wordsOf(text: string): string[] {
+	return text
+		.toLowerCase()
+		.split(/[^a-z0-9]+/)
+		.filter(Boolean);
+}
+
+/** Does a word name a keyword ("cyber" names "cybersecurity")? */
+function namesKeyword(word: string, keyword: string): boolean {
+	if (word === keyword) return true;
+	if (word.length < 3 || keyword.length < 3) return false;
+	return keyword.startsWith(word) || word.startsWith(keyword);
+}
+
+/**
+ * The CS50 course a LOOSE name points at — null when the name does not
+ * really name one.
+ *
+ * The rule: a loose name has to name the FAMILY ("cs50") to reach the
+ * catalogue at all, and one of the family's own keywords picks the course
+ * inside it ("cs50 python" is CS50's Python course). A bare "python" or
+ * "c" names a LANGUAGE, not a course — it must not land on a CS50 course
+ * by accident, so it goes to the web search instead (or nowhere).
+ *
+ * The family on its own ("cs50") is CS50x, the flagship.
+ */
+export function looseCs50Course(needle: string): Cs50Course | null {
+	const words = wordsOf(needle);
+	if (words.length === 0) return null;
+	const family = words.find((word) => word.startsWith("cs50"));
+	if (!family) return null;
+	// The course's own id ("cs50x") names the course outright.
+	const byId = CS50_CATALOG.find((course) => course.id === family);
+	if (byId) return byId;
+	// Inside the family, the keywords pick the course.
+	const rest = words.filter((word) => word !== "cs50");
+	const scored = CS50_CATALOG.map((course) => ({
+		course,
+		score: rest.filter((word) => (CS50_KEYWORDS[course.id] ?? []).some((keyword) => namesKeyword(word, keyword))).length,
+	}));
+	scored.sort((a, b) => b.score - a.score);
+	const best = scored[0];
+	if (!best || best.score === 0) return cs50Course("cs50x"); // the family alone
+	const second = scored[1];
+	// Two courses match the name equally well: that is a guess, not a
+	// match — the search (or a question) decides, not this table.
+	if (second && second.score === best.score) return null;
+	return best.course;
+}
+
 /** The problem id: a slug of the spec path ("mario/less" → "mario-less"). */
 export function problemIdFromPath(specUrl: string, title: string): string {
 	let path = specUrl;
@@ -316,11 +383,19 @@ export const cs50Adapter: CourseAdapter = {
 		for (const file of problem.files) {
 			const target = path.join(folder, file.name);
 			if (fs.existsSync(target)) continue;
+			// A starter file may name its own folder ("lab01/lab01.py"):
+			// the folder is made, and the file is written only when it is
+			// not there yet — the learner's file always wins.
+			fs.mkdirSync(path.dirname(target), { recursive: true });
 			fs.writeFileSync(target, file.content, "utf-8");
 			created.push(file.name);
 		}
 		// The starter archives the course hands out (the AI course's
-		// projects, for instance). Never overwrites the learner's work.
+		// projects, the CS50x psets that ship a zip). The archive is
+		// unpacked into a throwaway folder and only the files the problem
+		// does not have yet are copied over — so the second prepare (which
+		// happens on every view, run and check) never replaces the
+		// learner's work, not even the starter file the spec wrote.
 		for (const url of problem.distributionUrls) {
 			created.push(...(await downloadDistribution(url, folder)));
 		}

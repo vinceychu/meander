@@ -17,10 +17,12 @@
  * <anything>" work with one prompt.
  */
 
-import { courseIdFor, type CourseRequest, type ResolvedCourse } from "../../core/courses.ts";
+import { type CourseRequest, type ResolvedCourse } from "../../core/courses.ts";
 import type { CourseAdapter } from "../../core/course-adapters.ts";
+import { asWebUrl, isWebUrl, looksLikeCoursePage } from "../../core/course-outline.ts";
+import type { SearchProvider } from "../../core/search.ts";
 import { searchProvider } from "../search.ts";
-import { cs50Adapter, cs50Course, cs50CourseFor, CS50_CATALOG } from "./cs50.ts";
+import { cs50Adapter, cs50Course, cs50CourseFor, looseCs50Course, CS50_CATALOG } from "./cs50.ts";
 import { courseIdForUrl, genericAdapter } from "./generic.ts";
 
 /** Every adapter, in the order they are asked. */
@@ -35,21 +37,40 @@ export function adapterFor(ref: string): CourseAdapter {
 	return genericAdapter;
 }
 
-/** Is this reference a web page? */
+/** Is this reference a web page? (A scheme-less host counts.) */
 function isUrl(ref: string): boolean {
-	return /^https?:\/\//i.test(ref.trim());
+	return isWebUrl(ref);
+}
+
+/** The seams the search fallback runs on (the tests replace them). */
+export interface CourseSearchOptions {
+	/** The search engine (the app's configured one by default). */
+	provider?: SearchProvider | null;
+	/** The page fetcher (the app's plain fetch by default). */
+	fetch?: (url: string) => Promise<string>;
+}
+
+/** The plain page fetch the search fallback reads with. */
+async function fetchPageText(url: string): Promise<string> {
+	const response = await fetch(url, { headers: { "User-Agent": "Meander (course lookup)" }, signal: AbortSignal.timeout(20_000) });
+	if (!response.ok) throw new Error(`the page answered ${response.status}`);
+	return response.text();
 }
 
 /**
  * Find a course's official page for a NAME.
  *
  * The catalogue is asked first (the caller does that); this is the second
- * step — a web search for the course, and the first result that looks like
- * the course's own site. A search engine that is not configured is
- * reported honestly: the answer is "paste the URL", never a guess.
+ * step — a web search for the course, and the first result whose page
+ * REALLY looks like a course: it says "course", "syllabus",
+ * "assignments"… (a search for a course name also returns a forum thread
+ * or a Wikipedia entry, and those are not the course).
+ *
+ * A search engine that is not configured is reported honestly: the answer
+ * is "paste the URL", never a guess.
  */
-export async function findCoursePage(name: string): Promise<string | null> {
-	const provider = searchProvider();
+export async function findCoursePage(name: string, opts: CourseSearchOptions = {}): Promise<string | null> {
+	const provider = opts.provider === undefined ? searchProvider() : opts.provider;
 	if (!provider) return null;
 	let hits: Awaited<ReturnType<typeof provider.search>>;
 	try {
@@ -57,16 +78,25 @@ export async function findCoursePage(name: string): Promise<string | null> {
 	} catch {
 		return null;
 	}
+	const read = opts.fetch ?? fetchPageText;
 	for (const hit of hits) {
 		const url = hit.url?.trim();
 		if (!url || !isUrl(url)) continue;
+		const page = asWebUrl(url);
 		try {
-			const parsed = new URL(url);
+			const parsed = new URL(page);
 			if (parsed.protocol !== "http:" && parsed.protocol !== "https:") continue;
 		} catch {
 			continue;
 		}
-		return url;
+		// The page has to look like a course's own page, or it is not the
+		// course — the search moves on to the next hit.
+		try {
+			const html = await read(page);
+			if (looksLikeCoursePage(html)) return page;
+		} catch {
+			/* a page that will not fetch is not the course's page */
+		}
 	}
 	return null;
 }
@@ -77,10 +107,15 @@ export async function findCoursePage(name: string): Promise<string | null> {
  *
  * The order is the one the learner would expect:
  *   1. the catalogue (the CS50 family, by id or by title);
- *   2. a URL (the course's own page);
+ *   2. a URL (the course's own page — with or without its scheme);
  *   3. a name (the catalogue again by a loose match, then a web search).
+ *
+ * The resolved course's `ref` is always something the adapter registry can
+ * route: the catalogue's id, or the course's own URL. A name that resolves
+ * to a course page is remembered BY THAT PAGE, so the adapter that reads
+ * the course is the adapter that built it.
  */
-export async function resolveCourseRef(ref: string): Promise<ResolvedCourse> {
+export async function resolveCourseRef(ref: string, opts: CourseSearchOptions = {}): Promise<ResolvedCourse> {
 	const needle = ref.trim();
 	if (!needle) throw new Error("No course was named.");
 
@@ -89,7 +124,7 @@ export async function resolveCourseRef(ref: string): Promise<ResolvedCourse> {
 	if (cs50) {
 		return {
 			courseId: cs50.id,
-			ref: needle,
+			ref: cs50.id,
 			title: cs50.title,
 			source: cs50.source,
 			...(cs50.edition ? { edition: cs50.edition } : {}),
@@ -97,29 +132,27 @@ export async function resolveCourseRef(ref: string): Promise<ResolvedCourse> {
 		};
 	}
 
-	// 2. a URL — the course's own page.
+	// 2. a URL — the course's own page ("cs61a.org" counts as one).
 	if (isUrl(needle)) {
-		const url = needle.startsWith("http") ? needle : `https://${needle}`;
+		const url = asWebUrl(needle);
 		const id = courseIdForUrl(url);
 		return {
 			courseId: id,
-			ref: needle,
+			ref: url,
 			title: id,
 			source: url,
 			adapter: adapterFor(url).id,
 		};
 	}
 
-	// 3. a name. The catalogue by a loose match ("cs50 python", "python")…
-	const loose = CS50_CATALOG.find(
-		(course) =>
-			course.title.toLowerCase().includes(needle.toLowerCase()) ||
-			course.id.toLowerCase().includes(needle.toLowerCase().replace(/\s+/g, "")),
-	);
+	// 3. a name. The catalogue by a loose match — but only a REAL one:
+	// the name has to name the family ("cs50 python"), not just a word
+	// that happens to be in a title ("python" is a language, not a course).
+	const loose = looseCs50Course(needle);
 	if (loose) {
 		return {
 			courseId: loose.id,
-			ref: needle,
+			ref: loose.id,
 			title: loose.title,
 			source: loose.source,
 			...(loose.edition ? { edition: loose.edition } : {}),
@@ -128,7 +161,7 @@ export async function resolveCourseRef(ref: string): Promise<ResolvedCourse> {
 	}
 
 	// …and the web, for everything else.
-	const page = await findCoursePage(needle);
+	const page = await findCoursePage(needle, opts);
 	if (!page) {
 		throw new Error(
 			`No course named "${needle}" is in the catalogue, and no search engine is available to find it. ` +
@@ -137,7 +170,7 @@ export async function resolveCourseRef(ref: string): Promise<ResolvedCourse> {
 	}
 	return {
 		courseId: courseIdForUrl(page),
-		ref: needle,
+		ref: page,
 		title: needle,
 		source: page,
 		adapter: adapterFor(page).id,
