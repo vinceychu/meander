@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BookOpenIcon, GraduationCapIcon, Loader2Icon, PlayIcon, SparklesIcon } from "lucide-react";
+import { BookOpenIcon, GraduationCapIcon, LinkIcon, Loader2Icon, PlayIcon, SparklesIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SidebarToggle } from "@/components/sidebar";
 import { CourseProgressBar } from "@/components/courses/course-parts";
@@ -43,6 +43,7 @@ export function CoursesView() {
 	const [data, setData] = useState<CoursesPayload | null>(null);
 	const [starting, setStarting] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [ref, setRef] = useState("");
 	const starterRef = useMemo(() => new SessionStarter(), []);
 
 	const load = useCallback(async () => {
@@ -79,6 +80,36 @@ export function CoursesView() {
 		},
 		[router, starterRef],
 	);
+
+	/** Learn ANY course: a URL or a name. The server resolves it (the
+	 *  catalogue first, then the course's own page) and fetches the
+	 *  syllabus; the session then plans it like any other course. */
+	const learn = useCallback(async () => {
+		const wanted = ref.trim();
+		if (!wanted) return;
+		setStarting("ref");
+		setError(null);
+		try {
+			const res = await fetch("/api/courses", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ ref: wanted }),
+			});
+			const payload = (await res.json().catch(() => null)) as { course?: Course; error?: string } | null;
+			if (!res.ok || !payload?.course) {
+				throw new Error(payload?.error ?? "The course could not be fetched.");
+			}
+			const course = payload.course;
+			const target = await starterRef.start(
+				{ title: courseOpeningPrompt(course.id, course.title), courseId: course.id },
+				fetch,
+			);
+			router.push(target);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : "The course could not be fetched.");
+			setStarting(null);
+		}
+	}, [ref, router, starterRef]);
 
 	const started = new Set((data?.courses ?? []).map((c) => c.id));
 	const catalogue = data?.catalog ?? [];
@@ -145,6 +176,39 @@ export function CoursesView() {
 							})}
 						</ul>
 					)}
+				</section>
+
+				{/* ── Any course: a URL or a name ── */}
+				<section className="mb-8">
+					<h2 className="mb-2 font-ui text-[11px] uppercase tracking-widest text-muted-foreground">Learn any course</h2>
+					<form
+						className="flex flex-wrap items-center gap-2"
+						onSubmit={(event) => {
+							event.preventDefault();
+							void learn();
+						}}
+					>
+						<div className="relative min-w-0 flex-1">
+							<LinkIcon className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+							<input
+								type="text"
+								value={ref}
+								onChange={(event) => setRef(event.target.value)}
+								placeholder="Paste a course URL (https://cs61a.org/) or type a course name"
+								aria-label="A course URL or name"
+								data-testid="course-ref-input"
+								className="h-9 w-full rounded-md border bg-background pl-8 pr-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							/>
+						</div>
+						<Button type="submit" size="sm" disabled={starting !== null || !ref.trim()} data-testid="learn-any-course">
+							{starting === "ref" ? <Loader2Icon className="size-3.5 animate-spin" /> : <SparklesIcon className="size-3.5" />}
+							Learn it
+						</Button>
+					</form>
+					<p className="mt-1.5 text-xs text-muted-foreground">
+						Meander reads the course&apos;s own pages — its syllabus, its notes, its assignments — and keeps them on disk, so the
+						course works offline afterwards.
+					</p>
 				</section>
 
 				{/* ── The catalogue ── */}

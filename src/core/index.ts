@@ -102,3 +102,7 @@ export * from "./notes-progress.ts";
 // progress map, the plan helpers) — browser-safe, so the shell can render
 // a course's units, its next step and its progress.
 export * from "./courses.ts";
+// The course adapters (2026-11-09): the seam every course family sits
+// behind — the grader labels the course page shows and the verdict reader
+// the app and the tutor share.
+export * from "./course-adapters.ts";

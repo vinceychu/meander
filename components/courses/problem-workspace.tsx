@@ -3,12 +3,13 @@
 /**
  * THE PROBLEM WORKSPACE (2026-11-09) — do the pset right here.
  *
- * An editor over the problem's files (C / Python / SQL / HTML), a Run pane
- * (make + the binary, python3, sqlite3 — server-side, sandboxed), and a
- * Check button that runs the same grader the tutor uses, so the two never
- * disagree. The files live in the workspace folder (~/cs50/<problem> by
- * default) — the SAME folder VS Code opens, so switching modes never
- * loses work.
+ * An editor over the problem's files (C / C++ / Python / SQL / HTML / JS /
+ * Go / Rust), a Run pane (make + the binary, python3, node, sqlite3, go,
+ * rustc — server-side, sandboxed), and a Check button that runs the same
+ * grader the tutor uses — the course's own grader, its tests, or the
+ * tutor's review — so the two never disagree. The files live in the
+ * workspace folder (~/cs50/<problem> by default) — the SAME folder VS Code
+ * opens, so switching modes never loses work.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -21,6 +22,9 @@ import { tags as t } from "@lezer/highlight";
 import { c as cLegacy } from "@codemirror/legacy-modes/mode/clike";
 import { python as pythonLegacy } from "@codemirror/legacy-modes/mode/python";
 import { sqlite as sqlLegacy } from "@codemirror/legacy-modes/mode/sql";
+import { javascript as jsLegacy } from "@codemirror/legacy-modes/mode/javascript";
+import { go as goLegacy } from "@codemirror/legacy-modes/mode/go";
+import { rust as rustLegacy } from "@codemirror/legacy-modes/mode/rust";
 import { html as htmlLegacy } from "@codemirror/lang-html";
 import {
 	BookOpenIcon,
@@ -37,7 +41,7 @@ import { Button } from "@/components/ui/button";
 import { SidebarToggle } from "@/components/sidebar";
 import { SessionStarter } from "@/components/start-session";
 import { cn } from "@/lib/utils";
-import type { CourseProblem } from "@/src/core";
+import { graderLabel, type CourseProblem, type GraderKind } from "@/src/core";
 
 interface ProblemFile {
 	name: string;
@@ -73,12 +77,15 @@ const highlight = HighlightStyle.define([
 	{ tag: t.invalid, color: "var(--destructive)" },
 ]);
 
-/** The language support per file (C / Python / SQL / HTML). */
+/** The language support per file (C / C++ / Python / SQL / HTML / JS / Go / Rust). */
 function languageExtension(language: string): Extension {
-	if (language === "c") return StreamLanguage.define(cLegacy);
+	if (language === "c" || language === "cpp") return StreamLanguage.define(cLegacy);
 	if (language === "python") return StreamLanguage.define(pythonLegacy);
 	if (language === "sql") return StreamLanguage.define(sqlLegacy);
 	if (language === "html") return htmlLegacy();
+	if (language === "javascript" || language === "typescript") return StreamLanguage.define(jsLegacy);
+	if (language === "go") return StreamLanguage.define(goLegacy);
+	if (language === "rust") return StreamLanguage.define(rustLegacy);
 	return [];
 }
 
@@ -91,6 +98,7 @@ export function ProblemWorkspace({ courseId, problemId }: { courseId: string; pr
 	const [dirty, setDirty] = useState<Record<string, boolean>>({});
 	const [runOutput, setRunOutput] = useState<string | null>(null);
 	const [checkOutput, setCheckOutput] = useState<string | null>(null);
+	const [checkGrader, setCheckGrader] = useState<GraderKind | null>(null);
 	const [running, setRunning] = useState(false);
 	const [checking, setChecking] = useState(false);
 	const [saving, setSaving] = useState(false);
@@ -153,8 +161,9 @@ export function ProblemWorkspace({ courseId, problemId }: { courseId: string; pr
 		setCheckOutput(null);
 		try {
 			const res = await fetch(`/api/courses/${courseId}/problems/${problemId}/check`, { method: "POST" });
-			const payload = (await res.json()) as { ok: boolean; output: string };
+			const payload = (await res.json()) as { ok: boolean; output: string; grader?: GraderKind };
 			setCheckOutput(payload.output);
+			setCheckGrader(payload.grader ?? null);
 		} catch {
 			setCheckOutput("The check could not be run.");
 		} finally {
@@ -295,7 +304,9 @@ export function ProblemWorkspace({ courseId, problemId }: { courseId: string; pr
 						<BookOpenIcon className="size-3.5 text-muted-foreground" />
 						<span className="font-ui text-[11px] uppercase tracking-widest text-muted-foreground">Check</span>
 						{checkOutput && (
-							<span className="ml-auto font-ui text-[10px] uppercase tracking-wider text-muted-foreground">check50</span>
+							<span className="ml-auto font-ui text-[10px] uppercase tracking-wider text-muted-foreground">
+								{graderLabel({ grader: checkGrader ?? data.problem.grader })}
+							</span>
 						)}
 					</div>
 					<pre className="max-h-64 min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-3 py-2 font-mono text-xs leading-relaxed">
@@ -304,7 +315,7 @@ export function ProblemWorkspace({ courseId, problemId }: { courseId: string; pr
 					<div className="border-t px-3 py-2">
 						<p className="font-ui text-[10px] leading-relaxed text-muted-foreground">
 							The files live in <span className="font-mono">{data.folder}</span> — the same folder VS Code opens. Nothing is
-							submitted to CS50 for you.
+							submitted to the course for you.
 						</p>
 					</div>
 				</div>

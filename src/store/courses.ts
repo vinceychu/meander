@@ -175,6 +175,45 @@ export function cachedPageIndex(courseId: string): PageIndex {
 	return readPageIndex(courseId);
 }
 
+// ─── the course requests ─────────────────────────────────────────────────────
+
+const REQUESTS_FILE = path.join(PATHS.courses, "requests.json");
+
+/** One course's request: where it came from, so it can be rebuilt. */
+export interface CourseRequestRecord {
+	courseId: string;
+	/** What the learner gave (a catalogue id, a URL, a name). */
+	ref: string;
+	title: string;
+	source: string;
+	edition?: string;
+	/** Which adapter read it ("cs50", "generic"). */
+	adapter: string;
+}
+
+function readRequests(): Record<string, CourseRequestRecord> {
+	try {
+		const raw = JSON.parse(fs.readFileSync(REQUESTS_FILE, "utf-8")) as Record<string, CourseRequestRecord>;
+		return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+	} catch {
+		return {};
+	}
+}
+
+/** One course's request (null when it was never recorded). */
+export function readCourseRequest(courseId: string): CourseRequestRecord | null {
+	return readRequests()[courseId] ?? null;
+}
+
+/** Record a course's request (the course remembers where it came from). */
+export function writeCourseRequest(courseId: string, record: CourseRequestRecord): CourseRequestRecord {
+	const requests = readRequests();
+	requests[courseId] = record;
+	fs.mkdirSync(PATHS.courses, { recursive: true });
+	writeFileAtomicSync(REQUESTS_FILE, JSON.stringify(requests, null, "\t"), { allowInPlaceFallback: true });
+	return record;
+}
+
 // ─── the chat bindings ──────────────────────────────────────────────────────
 
 const BINDINGS_FILE = path.join(PATHS.courses, "bindings.json");

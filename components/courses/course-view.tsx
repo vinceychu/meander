@@ -32,6 +32,7 @@ import { SessionStarter } from "@/components/start-session";
 import { cn } from "@/lib/utils";
 import {
 	formatMinutes,
+	graderLabel,
 	problemMode,
 	progressKey,
 	segmentUrl,
@@ -212,6 +213,10 @@ export function CourseView({ courseId }: { courseId: string }) {
 																<div className="flex flex-wrap items-center gap-2">
 																	<span className="min-w-0 flex-1 truncate text-sm font-medium">{problem.title}</span>
 																	<VariantChip variant={problem.variant} />
+																	{/* How this problem is graded — the course's own grader, or the tutor's review. */}
+																	<span className="rounded-sm border border-border px-1.5 py-0.5 font-ui text-[10px] uppercase tracking-wider text-muted-foreground">
+																		{graderLabel(problem)}
+																	</span>
 																	<ProblemStatusBadge status={entry?.status ?? "todo"} />
 																	<Estimate minutes={problem.estimateMinutes} />
 																</div>
