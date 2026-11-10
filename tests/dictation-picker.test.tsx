@@ -110,7 +110,7 @@ test("an initial load failure is visible and opening the menu again can retry", 
 test("the real picker searches by language, chooses with Arrow/Enter, and restores focus", async () => {
 	const f = await fixture();
 	assert.match(trigger().textContent!, /English/);
-	for (const token of ["h-7", "rounded-sm", "border-border", "bg-background", "font-ui", "text-xs"]) {
+	for (const token of ["h-7", "rounded-sm", "border-border", "bg-background", "text-sm"]) {
 		assert.ok(trigger().className.split(" ").includes(token), `shared settings trigger: ${token}`);
 	}
 	await click(trigger());
@@ -234,7 +234,7 @@ for (const source of ["none", "file", "env"] as const) test(`Language is below t
 	assert.equal(byTest("dictation-setup-hint").querySelector("a")!.href, "https://console.deepgram.com/");
 	assert.equal(byTest("dictation-setup-hint").querySelector("a")!.textContent, "Deepgram API key");
 	assert.equal(byTest("dictation-setup-hint").querySelectorAll("a").length, 1);
-	assert.match(rows[1]!.querySelector(".font-prose")!.className, /text-\(length:--lh-prose-size\)/);
+	assert.ok(rows[1]!.querySelector(".font-medium")!.className.includes("text-sm font-medium text-foreground"));
 	assert.equal(trigger().disabled, false, "language is independent of key ownership");
 	await click(byTest("key-deepgram_api_key-row"));
 	if (source !== "env") assert.ok(byTest("key-deepgram_api_key-editor"));

@@ -254,6 +254,18 @@ body {
 	line-height: 1.25;
 }
 
+/* The settings surfaces (settings typography normalization) run ONE family
+   — the app's default sans — and the ladder's text-sm size. `.lh-input`
+   wears the READING family and size, which inside a settings menu is a
+   stray serif-ish face at 16px: the dropdown's search field is a CONTROL,
+   not a reading surface, so it takes the settings' own family and scale.
+   Unlayered, like `.lh-input` itself (an unlayered rule beats the utility
+   layer), so specificity decides between the two. */
+.lh-settings-menu .lh-input {
+	font-family: var(--font-sans);
+	font-size: var(--text-sm);
+}
+
 /* Thin dark native scrollbar (app-wide): dark thumb, transparent track. */
 * {
 	scrollbar-width: thin;
