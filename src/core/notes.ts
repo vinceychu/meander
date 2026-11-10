@@ -2,8 +2,10 @@
  * NOTES (2026-11-06): the Markdown vault's pure half — Obsidian-compatible
  * parsing (frontmatter properties, [[wikilinks]], ![[embeds]], #tags,
  * headings, block ids, tasks), link resolution, the backlink index, search
- * with operators, link rewriting on rename, and the Bases engine (filtered,
- * sorted, grouped views over note properties: table / cards / kanban).
+ * with operators, link rewriting on rename, related-note ranking (TF-IDF
+ * over titles and bodies), inserting a link under a "## Related" heading,
+ * and the Bases engine (filtered, sorted, grouped views over note
+ * properties: table / cards / kanban).
  *
  * Browser-safe (no Node imports): the server builds the index with it and
  * the editor uses the same functions for autocomplete and live views.
@@ -607,6 +609,27 @@ export function buildIndex(files: readonly VaultFile[], read: (path: string) => 
 	return { notes, files: [...files], folders: [...folders].sort(), backlinks, tags, unresolved };
 }
 
+/**
+ * Outgoing note-to-note links plus unresolved wikilink targets.
+ * Attachments and self-links are not relations between notes.
+ * The graph turns related-edges on by itself while this is under
+ * {@link RELATED_EDGES_AUTO_MAX_LINKS}.
+ */
+export function noteLinkCount(notes: readonly NoteMeta[]): number {
+	let n = 0;
+	for (const note of notes) {
+		for (const l of note.links) {
+			if (l.path === note.path) continue;
+			if (l.path === null) {
+				if (l.target) n++;
+				continue;
+			}
+			if (isNotePath(l.path)) n++;
+		}
+	}
+	return n;
+}
+
 // ─── Mentions, rename ───────────────────────────────────────────────────────
 
 /** Notes that mention `title` (or an alias) in plain text without linking it. */
@@ -639,6 +662,260 @@ export function unlinkedMentions(
 
 export function escapeRe(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ─── Related notes (no model, no network) ──────────────────────────────────
+
+export interface RelatedHit {
+	path: string;
+	/** Cosine similarity in [0, 1]. */
+	score: number;
+}
+
+export interface RelatedEdge {
+	source: string;
+	target: string;
+	score: number;
+}
+
+/** Dashed graph edges at or above this cosine. */
+export const RELATED_EDGE_THRESHOLD = 0.15;
+
+/** Related edges default on while the vault has fewer links than this. */
+export const RELATED_EDGES_AUTO_MAX_LINKS = 10;
+
+const RELATED_STOP = new Set(
+	"a an the and or but if then else of to in on for with at by from as is are was were be been being it this that these those i you we they he she my your our their not no do does did have has had will can could should would about into over after before than so just also its via per vs too very more most other some such only own same out up down off when what which who how why".split(
+		" ",
+	),
+);
+
+export interface RelatedDoc {
+	path: string;
+	title: string;
+	text: string;
+}
+
+interface TermVec {
+	path: string;
+	weights: Map<string, number>;
+	norm: number;
+}
+
+/** Fold a trailing plural s so "eigenvector" and "eigenvectors" meet. Not a stemmer. */
+function foldTerm(t: string): string {
+	if (t.length > 4 && t.endsWith("s") && !t.endsWith("ss")) return t.slice(0, -1);
+	return t;
+}
+
+function addTerms(raw: string, weight: number, into: Map<string, number>) {
+	const han: string[] = [];
+	const latin = raw.replace(/\p{Script=Han}+/gu, (run) => {
+		han.push(run);
+		return " ";
+	});
+	for (const run of han) {
+		if (run.length === 1) into.set(run, (into.get(run) ?? 0) + weight);
+		else
+			for (let i = 0; i < run.length - 1; i++) {
+				const g = run.slice(i, i + 2);
+				into.set(g, (into.get(g) ?? 0) + weight);
+			}
+	}
+	for (const m of latin.toLowerCase().matchAll(/[a-z0-9][a-z0-9'-]{1,}/g)) {
+		const t = foldTerm(m[0]);
+		if (RELATED_STOP.has(t) || /^\d+$/.test(t)) continue;
+		into.set(t, (into.get(t) ?? 0) + weight);
+	}
+}
+
+/** Title tokens count three times. Code fences and frontmatter do not count. */
+export function termCounts(title: string, text: string): Map<string, number> {
+	const counts = new Map<string, number>();
+	addTerms(title, 3, counts);
+	addTerms(maskCode(parseFrontmatter(text).body), 1, counts);
+	return counts;
+}
+
+function buildVectors(docs: readonly RelatedDoc[]): TermVec[] {
+	const tfs = docs.map((d) => ({ path: d.path, tf: termCounts(d.title, d.text) }));
+	const df = new Map<string, number>();
+	for (const d of tfs) for (const term of d.tf.keys()) df.set(term, (df.get(term) ?? 0) + 1);
+	const n = Math.max(docs.length, 1);
+	return tfs.map((d) => {
+		const weights = new Map<string, number>();
+		let sumSq = 0;
+		for (const [term, tf] of d.tf) {
+			const idf = Math.log((n + 1) / ((df.get(term) ?? 0) + 1)) + 1;
+			const w = (1 + Math.log(tf)) * idf;
+			weights.set(term, w);
+			sumSq += w * w;
+		}
+		return { path: d.path, weights, norm: Math.sqrt(sumSq) };
+	});
+}
+
+function cosine(a: TermVec, b: TermVec): number {
+	if (a.norm === 0 || b.norm === 0) return 0;
+	const [small, large] = a.weights.size < b.weights.size ? [a, b] : [b, a];
+	let dot = 0;
+	for (const [term, w] of small.weights) {
+		const other = large.weights.get(term);
+		if (other) dot += w * other;
+	}
+	return dot / (a.norm * b.norm);
+}
+
+function roundScore(score: number): number {
+	return Math.round(score * 1000) / 1000;
+}
+
+function topFromVectors(vecs: readonly TermVec[], self: string, limit: number): RelatedHit[] {
+	const me = vecs.find((v) => v.path === self);
+	if (!me) return [];
+	return vecs
+		.filter((v) => v.path !== self)
+		.map((v) => ({ path: v.path, score: cosine(me, v) }))
+		.filter((h) => h.score > 0)
+		.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
+		.slice(0, limit)
+		.map((h) => ({ path: h.path, score: roundScore(h.score) }));
+}
+
+function edgesFromScores(vecs: readonly TermVec[], scored: readonly { a: number; b: number; score: number }[], perNode: number): RelatedEdge[] {
+	const kept = vecs.map(() => 0);
+	const edges: RelatedEdge[] = [];
+	const ordered = [...scored].sort((x, y) => y.score - x.score || vecs[x.a]!.path.localeCompare(vecs[y.a]!.path) || vecs[x.b]!.path.localeCompare(vecs[y.b]!.path));
+	for (const s of ordered) {
+		// Highest scores first, so a full node keeps its closest notes.
+		if (kept[s.a]! >= perNode || kept[s.b]! >= perNode) continue;
+		kept[s.a] = kept[s.a]! + 1;
+		kept[s.b] = kept[s.b]! + 1;
+		const pa = vecs[s.a]!.path;
+		const pb = vecs[s.b]!.path;
+		const source = pa < pb ? pa : pb;
+		const target = pa < pb ? pb : pa;
+		edges.push({ source, target, score: roundScore(s.score) });
+	}
+	return edges;
+}
+
+/** Vaults up to this size compare every pair. Larger vaults only compare notes that share an uncommon word. */
+const RELATED_ALL_PAIRS_MAX = 160;
+
+function edgesFromVectors(vecs: readonly TermVec[], threshold: number, perNode = 4): RelatedEdge[] {
+	const n = vecs.length;
+	const scored: { a: number; b: number; score: number }[] = [];
+	const push = (a: number, b: number) => {
+		const score = cosine(vecs[a]!, vecs[b]!);
+		if (score >= threshold) scored.push({ a, b, score });
+	};
+	if (n <= RELATED_ALL_PAIRS_MAX) {
+		for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) push(i, j);
+		return edgesFromScores(vecs, scored, perNode);
+	}
+	const postings = new Map<string, number[]>();
+	vecs.forEach((v, i) => {
+		for (const term of v.weights.keys()) {
+			const list = postings.get(term);
+			if (list) list.push(i);
+			else postings.set(term, [i]);
+		}
+	});
+	const cand = vecs.map(() => new Map<number, number>());
+	for (const ids of postings.values()) {
+		const df = ids.length;
+		if (df < 2 || df > 50) continue;
+		const rarity = 1 / df;
+		for (let a = 0; a < df; a++) {
+			for (let b = a + 1; b < df; b++) {
+				const ia = ids[a]!;
+				const ib = ids[b]!;
+				cand[ia]!.set(ib, (cand[ia]!.get(ib) ?? 0) + rarity);
+				cand[ib]!.set(ia, (cand[ib]!.get(ia) ?? 0) + rarity);
+			}
+		}
+	}
+	const pairs = new Map<string, [number, number]>();
+	for (let i = 0; i < n; i++) {
+		const row = [...cand[i]!.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40);
+		for (const [j] of row) {
+			const lo = Math.min(i, j);
+			const hi = Math.max(i, j);
+			pairs.set(`${lo}:${hi}`, [lo, hi]);
+		}
+	}
+	for (const [a, b] of pairs.values()) push(a, b);
+	return edgesFromScores(vecs, scored, perNode);
+}
+
+/** Other notes ranked by TF-IDF cosine over the title (×3) and the body. */
+export function rankRelated(self: string, docs: readonly RelatedDoc[], limit = 5): RelatedHit[] {
+	return topFromVectors(buildVectors(docs), self, limit);
+}
+
+/** Undirected pairs similar enough to draw as dashed graph edges. */
+export function relatedEdges(docs: readonly RelatedDoc[], threshold = RELATED_EDGE_THRESHOLD): RelatedEdge[] {
+	return edgesFromVectors(buildVectors(docs), threshold);
+}
+
+/** One vector build for both the panel (per note) and the dashed edges. */
+export function relateVault(docs: readonly RelatedDoc[], threshold = RELATED_EDGE_THRESHOLD): { edges: RelatedEdge[]; rank: (path: string, limit?: number) => RelatedHit[] } {
+	const vecs = buildVectors(docs);
+	return { edges: edgesFromVectors(vecs, threshold), rank: (path, limit = 5) => topFromVectors(vecs, path, limit) };
+}
+
+function findRelatedHeading(lines: readonly string[]): number {
+	let fence: string | null = null;
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
+		const opened = /^(```|~~~)/.exec(line);
+		if (opened) {
+			if (fence === null) fence = opened[1]!;
+			else if (line.startsWith(fence)) fence = null;
+			continue;
+		}
+		if (!fence && /^##\s+Related\s*$/i.test(line)) return i;
+	}
+	return -1;
+}
+
+/**
+ * Append `[[target]]` under a "## Related" heading, creating the heading
+ * at the end when the note doesn't have one. A link already in that
+ * section (including an alias or heading) is left as-is.
+ */
+export function appendRelatedLink(text: string, target: string): string {
+	const label = target.trim();
+	if (!label || /[\]\n]/.test(label)) return text;
+	const link = `[[${label}]]`;
+	const lines = text.split("\n");
+	const heading = findRelatedHeading(lines);
+	if (heading >= 0) {
+		let end = lines.length;
+		let fence: string | null = null;
+		for (let i = heading + 1; i < lines.length; i++) {
+			const line = lines[i]!;
+			const opened = /^(```|~~~)/.exec(line);
+			if (opened) {
+				if (fence === null) fence = opened[1]!;
+				else if (line.startsWith(fence)) fence = null;
+				continue;
+			}
+			if (!fence && /^#{1,2}\s+\S/.test(line)) {
+				end = i;
+				break;
+			}
+		}
+		const section = lines.slice(heading, end).join("\n");
+		if (new RegExp(`\\[\\[${escapeRe(label)}(?:\\]|#|\\|)`, "i").test(section)) return text;
+		let insertAt = end;
+		while (insertAt > heading + 1 && lines[insertAt - 1]!.trim() === "") insertAt--;
+		return [...lines.slice(0, insertAt), link, ...lines.slice(insertAt)].join("\n");
+	}
+	const trimmed = text.replace(/\s*$/, "");
+	const sep = trimmed.length ? "\n\n" : "";
+	return `${trimmed}${sep}## Related\n${link}\n`;
 }
 
 /** Rewrite links in `text` (a note at `fromPath`) that pointed at `oldPath`

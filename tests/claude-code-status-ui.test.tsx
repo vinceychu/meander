@@ -78,7 +78,7 @@ test("off by default; enabling persists before probing and reveals the version/a
 
 test("recheck matches Connect styling; Manage remains ghost", async () => {
 	fixture(async () => Response.json(status("not-found"))); await mount();
-	const row = (action: string) => parseHTML(renderToStaticMarkup(<ConnectionRow label="Fixture" action={action} disabled={false} onAction={() => {}} />)).document.querySelector("button")!;
+	const row = (action: string) => parseHTML(renderToStaticMarkup(<ConnectionRow label="Fixture" action={action} disabled={false} onAction={() => {}} actionClassName="text-sm" />)).document.querySelector("button")!;
 	assert.equal(button().getAttribute("class"), row("Connect").getAttribute("class"));
 	assert.equal(button().getAttribute("data-variant"), "outline");
 	assert.equal(row("Manage").getAttribute("data-variant"), "ghost");

@@ -12,7 +12,13 @@
 import { useState, type ComponentPropsWithRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-/** A section block: pronounced mono heading + content. */
+/** A section block: a quiet heading + content.
+ *
+ *  TYPE (settings typography normalization): the whole settings surface
+ *  runs ONE family — the app's default sans, inherited from the dialog
+ *  root — and a fixed size scale: headings text-sm font-semibold, row
+ *  labels text-sm font-medium, hints text-xs. Monospace is reserved for
+ *  literal values the user copies (key masks, env var names, paths). */
 export function SettingsSection({
 	title,
 	hint,
@@ -27,7 +33,7 @@ export function SettingsSection({
 }) {
 	return (
 		<section data-testid={testid} className="px-6 py-5">
-			<h2 className="text-sm uppercase tracking-widest text-foreground">{title}</h2>
+			<h2 className="text-sm font-semibold text-foreground">{title}</h2>
 			{hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
 			<div className="mt-4 flex flex-col gap-3">{children}</div>
 		</section>
@@ -47,7 +53,7 @@ export function SettingsGroup({
 }) {
 	return (
 		<div data-testid={testid} className="mt-5 border-t border-border/60 pt-4 first:mt-0 first:border-t-0 first:pt-0">
-			<p className="mb-2 text-xs uppercase tracking-widest text-muted-foreground">{label}</p>
+			<p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
 			<div className="flex flex-col gap-2">{children}</div>
 		</div>
 	);
@@ -73,8 +79,8 @@ export function SettingsRow({
 	return (
 		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", dimmed && "opacity-40")}>
 			<span className="min-w-0">
-				<span className="block font-prose text-(length:--lh-prose-size)">{label}</span>
-				{hint && <span className="block text-xs text-muted-foreground/70">{hint}</span>}
+				<span className="block text-sm font-medium text-foreground">{label}</span>
+				{hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
 			</span>
 			{children}
 		</div>
@@ -95,7 +101,7 @@ export function SettingsMenuTrigger({
 		{...props}
 		disabled={disabled}
 		className={cn(
-			"flex h-7 items-center gap-1 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground transition-colors",
+			"flex h-7 items-center gap-1 rounded-sm border border-border bg-background px-1.5 text-sm text-foreground transition-colors",
 			disabled || unavailable ? "cursor-not-allowed" : "hover:border-muted-foreground/50",
 			className,
 		)}
@@ -193,7 +199,7 @@ export function ThinSelect({
 			disabled={disabled}
 			onChange={(e) => onChange(e.target.value)}
 			className={cn(
-				"h-7 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none",
+				"h-7 rounded-sm border border-border bg-background px-1.5 text-sm text-foreground outline-none",
 				disabled && "cursor-not-allowed",
 			)}
 		>
@@ -252,7 +258,7 @@ export function CommitInput({
 					e.currentTarget.blur();
 				}
 			}}
-			className="h-7 w-40 rounded-sm border border-border bg-background px-2 font-ui text-xs text-foreground outline-none placeholder:text-muted-foreground/60"
+			className="h-7 w-40 rounded-sm border border-border bg-background px-2 text-sm text-foreground outline-none placeholder:text-muted-foreground/60"
 		/>
 	);
 }

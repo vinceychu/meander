@@ -90,18 +90,18 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 				<p className="mt-3 text-xs leading-relaxed text-muted-foreground" data-testid="subscription-privacy-notice">{subscriptionNotice(descriptor.label, web)}</p>
 				{dialog === "github-copilot" && <p className="mt-3 text-xs leading-relaxed text-muted-foreground" data-testid="copilot-policy-notice">{COPILOT_POLICY_NOTICE}</p>}
 			</> : <>
-				<div className="mt-4 flex items-center gap-3 text-xs text-foreground">
+				<div className="mt-4 flex items-center gap-3 text-sm text-foreground">
 					<Toggle label="Allow background use" checked={management ? status.allowBackgroundUse : background} disabled={busy || !!operation || status.pending || !status.available} onChange={(enabled) => { setBackground(enabled); if (management && bridge) void control(() => bridge.consent(dialog, enabled)); else setBackgroundDirty(true); }} />
-					<span>Allow background use<span className="mt-1 block leading-relaxed text-muted-foreground">{SUBSCRIPTION_BACKGROUND_HINT}</span></span>
+					<span>Allow background use<span className="mt-1 block text-xs leading-relaxed text-muted-foreground">{SUBSCRIPTION_BACKGROUND_HINT}</span></span>
 				</div>
 				{!status.available && <p className="mt-3 text-xs text-muted-foreground">Subscription sign-in requires the desktop app's private server connection. API-key connections remain available here.</p>}
-				{view === "connection" && interaction && <div className="mt-3 space-y-3 text-xs" data-testid="subscription-login-interaction">
+				{view === "connection" && interaction && <div className="mt-3 space-y-3 text-sm" data-testid="subscription-login-interaction">
 					{interaction.progress && <p role="status" className="text-muted-foreground">{interaction.progress}</p>}
 					{interaction.userCode && <p>Device code: <code className="select-text font-mono">{interaction.userCode}</code></p>}
 					{interaction.browser && <Button variant="outline" size="sm" disabled={busy} onClick={() => bridge && void bridge.open(dialog, interaction.attemptId, interaction.browser!.id).catch(() => setError("The browser could not be opened. Try again."))}>Open browser</Button>}
 					{prompt && <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); if (bridge) void bridge.respond(dialog, interaction.attemptId, prompt.id, promptValue).catch(() => setError(CONTROL_ERROR)); }}>
 						<label className="block" htmlFor="subscription-auth-prompt">{prompt.message}</label>
-						{prompt.type === "select" ? <select id="subscription-auth-prompt" value={promptValue} onChange={(event) => setPromptValue(event.target.value)} className="w-full rounded-sm border border-border bg-background px-2 py-1.5"><option value="" disabled>Select…</option>{prompt.options?.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select> : <input id="subscription-auth-prompt" type={prompt.type === "secret" ? "password" : "text"} autoComplete="off" value={promptValue} placeholder={prompt.placeholder} onChange={(event) => setPromptValue(event.target.value)} className="w-full rounded-sm border border-border bg-background px-2 py-1.5" />}
+						{prompt.type === "select" ? <select id="subscription-auth-prompt" value={promptValue} onChange={(event) => setPromptValue(event.target.value)} className="w-full rounded-sm border border-border bg-background px-2 py-1.5 text-sm"><option value="" disabled>Select…</option>{prompt.options?.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select> : <input id="subscription-auth-prompt" type={prompt.type === "secret" ? "password" : "text"} autoComplete="off" value={promptValue} placeholder={prompt.placeholder} onChange={(event) => setPromptValue(event.target.value)} className="w-full rounded-sm border border-border bg-background px-2 py-1.5 text-sm" />}
 						<Button type="submit" variant="outline" size="sm" disabled={busy || (prompt.type === "select" && !promptValue)}>Continue</Button>
 					</form>}
 				</div>}
@@ -119,23 +119,25 @@ export function NativeSubscriptionUIProvider({ children }: { children: React.Rea
 	</Context.Provider>;
 }
 
-export function NativeSubscriptionConnection({ providerId, labelClassName }: { providerId: NativeSubscriptionProviderId; labelClassName?: string }) {
+export function NativeSubscriptionConnection({ providerId, labelClassName, actionClassName }: { providerId: NativeSubscriptionProviderId; labelClassName?: string; actionClassName?: string }) {
 	const ui = useContext(Context), descriptor = NATIVE_SUBSCRIPTIONS.find((p) => p.providerId === providerId)!;
 	const status = ui.statuses.find((s) => s.providerId === providerId) ?? emptySubscriptionStatus(providerId);
 	return <div className="flex flex-col gap-2" data-testid={`${providerId}-connection`}>
-		<ConnectionRow label={descriptor.label} labelClassName={labelClassName} action={status.connectionId ? "Manage…" : "Connect"} disabled={ui.busy || !status.available || ui.statuses.some((s) => s.pending)} onAction={() => ui.open(providerId)} />
+		<ConnectionRow label={descriptor.label} labelClassName={labelClassName} actionClassName={actionClassName} action={status.connectionId ? "Manage…" : "Connect"} disabled={ui.busy || !status.available || ui.statuses.some((s) => s.pending)} onAction={() => ui.open(providerId)} />
 		{status.error && <p role="alert" className="text-xs text-red-400">{status.error}</p>}
 	</div>;
 }
 export function SubscriptionConnections({ setup = false }: { setup?: boolean }) {
-	// Providers uses ordinary settings-label typography. The setup surface
-	// keeps its existing compact labels; dialogs and actions are untouched.
-	const labelClassName = setup ? undefined : "font-prose text-(length:--lh-prose-size) text-foreground";
-	return <div className="space-y-3" data-testid="subscription-connections"><ChatGPTConnection setup={setup} labelClassName={labelClassName} />{NATIVE_SUBSCRIPTIONS.map((p) => <NativeSubscriptionConnection key={p.providerId} providerId={p.providerId} labelClassName={labelClassName} />)}</div>;
+	// Providers uses ordinary settings-label typography (settings
+	// normalization: labels text-sm font-medium, actions text-sm). The setup
+	// surface keeps its existing compact labels and actions.
+	const labelClassName = setup ? undefined : "text-sm font-medium text-foreground";
+	const actionClassName = setup ? undefined : "text-sm";
+	return <div className="space-y-3" data-testid="subscription-connections"><ChatGPTConnection setup={setup} labelClassName={labelClassName} actionClassName={actionClassName} />{NATIVE_SUBSCRIPTIONS.map((p) => <NativeSubscriptionConnection key={p.providerId} providerId={p.providerId} labelClassName={labelClassName} actionClassName={actionClassName} />)}</div>;
 }
-export function NativeSubscriptionBackgroundAccess({ provider }: { provider: string | undefined }) {
+export function NativeSubscriptionBackgroundAccess({ provider, className }: { provider: string | undefined; className?: string }) {
 	const ui = useContext(Context), descriptor = NATIVE_SUBSCRIPTIONS.find((p) => p.logicalId === provider);
 	const status = ui.statuses.find((s) => s.providerId === descriptor?.providerId);
 	if (!descriptor || !status?.connected || status.allowBackgroundUse) return null;
-	return <Button type="button" size="xs" variant="ghost" disabled={ui.busy} onClick={() => ui.open(descriptor.providerId)}>Enable background use</Button>;
+	return <Button type="button" size="xs" variant="ghost" className={className} disabled={ui.busy} onClick={() => ui.open(descriptor.providerId)}>Enable background use</Button>;
 }

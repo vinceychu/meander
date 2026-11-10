@@ -2,8 +2,9 @@
 /**
  * NOTES WORKSPACE (2026-11-06): Meander's Obsidian. A vault of plain
  * Markdown files with a file tree, tabs, Live Preview / Source / Reading
- * modes, properties, backlinks (+ unlinked mentions), outline, local and
- * global graph, Bases (table / cards / kanban), full-text search with
+ * modes, properties, a Connections panel (backlinks, outgoing and ghost
+ * links, unlinked mentions, shared tags, related notes, local graph),
+ * outline, global graph, Bases (table / cards / kanban), full-text search with
  * operators, tags, bookmarks, daily notes, templates, a quick switcher
  * (Mod-O) and command palette (Mod-P).
  *
@@ -30,7 +31,6 @@ import {
 	GraduationCapIcon,
 	HashIcon,
 	ImageIcon,
-	ListTreeIcon,
 	Link2Icon,
 	MoreHorizontalIcon,
 	NetworkIcon,
@@ -44,7 +44,6 @@ import {
 	Trash2Icon,
 	XIcon,
 	CodeIcon,
-	WaypointsIcon,
 	type LucideIcon,
 } from "lucide-react";
 import { Notes, localDate } from "@/src/core";
@@ -86,6 +85,8 @@ interface Prefs {
 	readableWidth: boolean;
 	spellcheck: boolean;
 	confirmDelete: boolean;
+	/** null = automatic: on while the vault has fewer than 10 links. */
+	showRelatedEdges: boolean | null;
 }
 
 const DEFAULT_PREFS: Prefs = {
@@ -100,6 +101,7 @@ const DEFAULT_PREFS: Prefs = {
 	readableWidth: true,
 	spellcheck: true,
 	confirmDelete: true,
+	showRelatedEdges: null,
 };
 
 const PREFS_KEY = "lh:notes-prefs";
@@ -165,7 +167,9 @@ export function NotesApp() {
 	const [leftOpen, setLeftOpen] = useState(true);
 	const [rightOpen, setRightOpen] = useState(true);
 	const [leftTab, setLeftTab] = useState<"files" | "search" | "tags" | "bookmarks">("files");
-	const [rightTab, setRightTab] = useState<"backlinks" | "outgoing" | "outline" | "graph">("backlinks");
+	const [rightTab, setRightTab] = useState<"connections" | "outline" | "graph">("connections");
+	const [lastNotePath, setLastNotePath] = useState<string | null>(null);
+	const [relatedEdges, setRelatedEdges] = useState<Notes.RelatedEdge[]>([]);
 	const [searchQ, setSearchQ] = useState("");
 	const [modal, setModal] = useState<null | "switcher" | "palette" | "settings" | "template" | "move">(null);
 	const [toast, setToast] = useState<string | null>(null);
@@ -185,6 +189,7 @@ export function NotesApp() {
 	const textCache = useRef(new Map<string, string>());
 	const starter = useRef(new SessionStarter());
 	const booted = useRef(false);
+	const graphFromQuery = useRef(false);
 
 	const active = tabs.find((t) => t.id === activeId) ?? null;
 	const activeMeta = active?.path ? index?.notes.find((n) => n.path === active.path) ?? null : null;
@@ -279,6 +284,7 @@ export function NotesApp() {
 	const open = useCallback(
 		(path: string, opts: { newTab?: boolean; sub?: string | null } = {}) => {
 			const kind = kindOf(path);
+			if (kind === "note") setLastNotePath(path);
 			const existing = tabsRef.current.find((t) => t.path === path);
 			pushRecent(path);
 			if (narrow) setLeftOpen(false);
@@ -612,39 +618,65 @@ export function NotesApp() {
 		[flushSave, refresh, setText],
 	);
 
-	// ── Boot: ?open / ?tag / ?create, then the default file (1.11) ──
+	// ── Boot: ?open / ?tag / ?create / ?view=graph, then the default file ──
 	useEffect(() => {
 		if (!index || booted.current) return;
 		booted.current = true;
+		const wantGraph = params.get("view") === "graph";
 		const p = params.get("open");
 		const tag = params.get("tag");
 		const create = params.get("create");
 		const st = load<{ tabs: string[]; active: string | null; recent: string[] }>(STATE_KEY, { tabs: [], active: null, recent: [] });
 		setRecent(st.recent ?? []);
-		if (p) return open(p);
+		const finish = () => {
+			if (!wantGraph) return;
+			graphFromQuery.current = true;
+			openGraph();
+		};
+		if (p) {
+			open(p);
+			return finish();
+		}
 		if (tag) {
 			setLeftTab("search");
 			setSearchQ(`tag:#${tag}`);
-			return;
+			return finish();
 		}
 		if (create) {
-			void createNote({ title: create, folder: prefs.newNoteFolder });
+			void createNote({ title: create, folder: prefs.newNoteFolder }).then(() => finish());
 			return;
 		}
 		const pf = load(PREFS_KEY, DEFAULT_PREFS);
 		const exists = (x: string) => index.files.some((f) => f.path === x);
-		if (pf.defaultOpen === "daily") return void openDaily();
-		if (pf.defaultOpen === "new") return void createNote({});
-		if (pf.defaultOpen === "specific" && pf.specificNote && exists(pf.specificNote)) return open(pf.specificNote);
+		if (pf.defaultOpen === "daily") {
+			void openDaily().then(() => finish());
+			return;
+		}
+		if (pf.defaultOpen === "new") {
+			void createNote({}).then(() => finish());
+			return;
+		}
+		if (pf.defaultOpen === "specific" && pf.specificNote && exists(pf.specificNote)) {
+			open(pf.specificNote);
+			return finish();
+		}
 		const restore = (st.tabs ?? []).filter(exists);
 		if (restore.length) {
 			for (const t of restore) open(t, { newTab: true });
+			// A graph deep-link wins over restoring the last note as the active tab.
+			if (wantGraph) return finish();
 			if (st.active && exists(st.active)) setTimeout(() => open(st.active!), 0);
-		} else if (index.notes.length === 0) void seedWelcome();
-		else open([...index.notes].sort((a, b) => b.mtime - a.mtime)[0]!.path);
+			return;
+		}
+		if (index.notes.length === 0) {
+			void seedWelcome().then(() => finish());
+			return;
+		}
+		open([...index.notes].sort((a, b) => b.mtime - a.mtime)[0]!.path);
+		finish();
 	}, [index]);
 
-	// Navigations inside the page (/notes?open=… from links elsewhere).
+	// Navigations inside the page (/notes?open=…, /notes?view=graph from the app sidebar).
 	useEffect(() => {
 		if (!booted.current) return;
 		const p = params.get("open");
@@ -654,6 +686,14 @@ export function NotesApp() {
 			setLeftOpen(true);
 			setLeftTab("search");
 			setSearchQ(`tag:#${tag}`);
+		}
+		if (params.get("view") === "graph") {
+			graphFromQuery.current = true;
+			openGraph();
+		} else if (graphFromQuery.current) {
+			graphFromQuery.current = false;
+			const note = [...tabsRef.current].reverse().find((t) => t.kind === "note" && t.path);
+			if (note) setActiveId(note.id);
 		}
 	}, [params]);
 
@@ -680,7 +720,7 @@ Plain Markdown files in your Meander data folder (or any folder you choose in �
 > New base (the database icon) makes table, card and kanban views over note properties like \`status\`.
 
 - [ ] Try checking this box
-- [x] Open the graph view (network icon)
+- [x] Open the graph view (the Graph button, or ⌘G)
 
 ==Highlights== and =={blue}colored highlights==, $e^{i\\pi}+1=0$, and mermaid:
 
@@ -693,6 +733,105 @@ graph LR; Note-->Lesson; Note-->Practice; Note-->Graph
 		await refresh();
 		open("Welcome.md");
 	}, [open, refresh]);
+
+	const linkCount = index ? Notes.noteLinkCount(index.notes) : 0;
+	const showRelatedEdges = prefs.showRelatedEdges ?? linkCount < Notes.RELATED_EDGES_AUTO_MAX_LINKS;
+	const vaultStamp = index ? index.files.map((f) => `${f.path}:${f.mtime}:${f.size}`).join("|") : "";
+	// Connections stays useful while the graph tab is in front: fall back to the last note.
+	const connectionPath = active?.kind === "note" && active.path ? active.path : lastNotePath;
+	const connectionMeta = connectionPath ? index?.notes.find((n) => n.path === connectionPath) ?? null : null;
+
+	useEffect(() => {
+		if (!showRelatedEdges) return;
+		let alive = true;
+		fetch("/api/notes/related?edges=1")
+			.then((r) => r.json())
+			.then((b: { edges?: Notes.RelatedEdge[] }) => {
+				if (alive) setRelatedEdges(Array.isArray(b.edges) ? b.edges : []);
+			})
+			.catch(() => {});
+		return () => {
+			alive = false;
+		};
+	}, [showRelatedEdges, vaultStamp]);
+
+	const setShowRelatedEdges = useCallback((on: boolean) => {
+		setPrefs((p) => {
+			const next = { ...p, showRelatedEdges: on };
+			save(PREFS_KEY, next);
+			return next;
+		});
+	}, []);
+
+	const focusConnections = useCallback(() => {
+		setRightOpen(true);
+		setRightTab("connections");
+		setLastNotePath((current) => {
+			if (current && indexRef.current?.notes.some((n) => n.path === current)) return current;
+			const activeNote = tabsRef.current.find((t) => t.id === activeId && t.kind === "note" && t.path);
+			if (activeNote?.path) return activeNote.path;
+			const newest = [...(indexRef.current?.notes ?? [])].sort((a, b) => b.mtime - a.mtime)[0];
+			return newest?.path ?? current;
+		});
+	}, [activeId]);
+
+	const linkRelated = useCallback(
+		async (targetPath: string) => {
+			const notePath = connectionPath;
+			if (!notePath || !resolver || targetPath === notePath) return;
+			const label = resolver.linkText(targetPath);
+			const tab = tabsRef.current.find((t) => t.path === notePath && t.kind === "note");
+			if (tab?.loaded) {
+				const next = Notes.appendRelatedLink(tab.text, label);
+				if (next === tab.text) return flash("Already linked.");
+				setText(tab.id, next);
+				// The editor reads its document only when it mounts.
+				setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, nonce: t.nonce + 1 } : t)));
+				return flash("Linked under Related.");
+			}
+			try {
+				const r = await api<{ content: string; mtime: number }>(`/api/notes/file?path=${encodeURIComponent(notePath)}`);
+				const next = Notes.appendRelatedLink(r.content, label);
+				if (next === r.content) return flash("Already linked.");
+				await api("/api/notes/file", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: notePath, content: next, baseMtime: r.mtime }) });
+				await refresh();
+				flash("Linked under Related.");
+			} catch (err) {
+				flash(`Couldn't link: ${(err as Error).message}`);
+			}
+		},
+		[connectionPath, flash, refresh, resolver, setText],
+	);
+
+	const linkMention = useCallback(
+		async (mentionPath: string) => {
+			if (!connectionPath) return;
+			const title = Notes.noteTitle(connectionPath);
+			const re = new RegExp(`(^|[^\\p{L}\\p{N}\\[])(${Notes.escapeRe(title)})(?=$|[^\\p{L}\\p{N}\\]])`, "iu");
+			const rewrite = (content: string) => content.replace(re, (_m, pre: string, word: string) => `${pre}[[${word === title ? title : `${title}|${word}`}]]`);
+			// An open tab is the copy the user is looking at. Writing the disk
+			// file underneath it loses the link on the next autosave.
+			const tab = tabsRef.current.find((t) => t.path === mentionPath && t.kind === "note" && t.loaded);
+			if (tab) {
+				const next = rewrite(tab.text);
+				if (next === tab.text) return;
+				setText(tab.id, next);
+				setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, nonce: t.nonce + 1 } : t)));
+				return flash("Linked.");
+			}
+			try {
+				const r = await api<{ content: string; mtime: number }>(`/api/notes/file?path=${encodeURIComponent(mentionPath)}`);
+				const next = rewrite(r.content);
+				if (next === r.content) return;
+				await api("/api/notes/file", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: mentionPath, content: next, baseMtime: r.mtime }) });
+				await refresh();
+				flash("Linked.");
+			} catch (err) {
+				flash(`Couldn't link: ${(err as Error).message}`);
+			}
+		},
+		[connectionPath, flash, refresh, setText],
+	);
 
 	// ── Commands ──
 	const commands = useMemo(
@@ -707,6 +846,7 @@ graph LR; Note-->Lesson; Note-->Practice; Note-->Graph
 				{ id: "switcher", label: "Quick switcher", hint: "⌘O", run: () => setModal("switcher") },
 				{ id: "search", label: "Search all notes", hint: "⌘⇧F", run: () => { setLeftOpen(true); setLeftTab("search"); } },
 				{ id: "graph", label: "Open graph view", hint: "⌘G", run: openGraph },
+				{ id: "connections", label: "Show connections", run: focusConnections },
 				{ id: "mode", label: "Toggle reading / editing", hint: "⌘E", run: () => active && setTabs((ts) => ts.map((t) => (t.id === active.id ? { ...t, mode: t.mode === "reading" ? prefs.defaultMode === "reading" ? "live" : prefs.defaultMode : "reading" } : t))) },
 				{ id: "source", label: "Toggle Live Preview / Source mode", run: () => active && setTabs((ts) => ts.map((t) => (t.id === active.id ? { ...t, mode: t.mode === "source" ? "live" : "source", nonce: t.nonce + 1 } : t))) },
 				{ id: "template", label: "Insert template", run: () => setModal("template") },
@@ -723,7 +863,7 @@ graph LR; Note-->Lesson; Note-->Practice; Note-->Graph
 				{ id: "settings", label: "Notes settings", run: () => setModal("settings") },
 				{ id: "close", label: "Close tab", hint: "⌘W", run: () => active && closeTab(active.id) },
 			] as { id: string; label: string; hint?: string; run: () => void }[],
-		[active, createNote, createBase, createFolder, openDaily, openGraph, prefs.defaultMode, teach, addToGraph, remove, resolver, closeTab, flash],
+		[active, createNote, createBase, createFolder, openDaily, openGraph, focusConnections, prefs.defaultMode, teach, addToGraph, remove, resolver, closeTab, flash],
 	);
 
 	const toggleBookmark = useCallback((path: string) => {
@@ -885,7 +1025,20 @@ graph LR; Note-->Lesson; Note-->Practice; Note-->Graph
 					<IconBtn icon={PlusIcon} label="New note (⌘N)" onClick={() => void createNote({ newTab: true })} />
 				</div>
 				<IconBtn icon={SearchIcon} label="Quick switcher (⌘O)" onClick={() => setModal("switcher")} />
-				<IconBtn icon={NetworkIcon} label="Graph view (⌘G)" onClick={openGraph} />
+				<button
+					type="button"
+					onClick={openGraph}
+					title="Graph view (⌘G)"
+					aria-label="Graph view (⌘G)"
+					data-testid="notes-graph-button"
+					className={cn(
+						"flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 font-ui text-xs font-medium text-primary-foreground hover:opacity-90",
+						active?.kind === "graph" && "ring-2 ring-ring",
+					)}
+				>
+					<NetworkIcon className="size-3.5" />
+					Graph
+				</button>
 				<ThemeToggle />
 				<IconBtn icon={PanelRightIcon} label="Toggle right sidebar (⌘\)" onClick={() => setRightOpen((v) => !v)} />
 			</div>
@@ -982,7 +1135,18 @@ graph LR; Note-->Lesson; Note-->Practice; Note-->Graph
 							</div>
 						</div>
 					)}
-					{active?.kind === "graph" && <NotesGraph index={index} active={null} local={false} onOpen={(p) => open(p)} />}
+					{active?.kind === "graph" && (
+						<NotesGraph
+							index={index}
+							active={null}
+							local={false}
+							onOpen={(p) => open(p)}
+							relatedEdges={relatedEdges}
+							showRelated={showRelatedEdges}
+							onShowRelatedChange={setShowRelatedEdges}
+							onOpenConnections={focusConnections}
+						/>
+					)}
 					{active?.kind === "file" && active.path && <FileViewer path={active.path} />}
 					{active?.kind === "base" && active.path && active.loaded && (
 						<div className="flex min-h-0 flex-1 flex-col">
@@ -1106,7 +1270,12 @@ graph LR; Note-->Lesson; Note-->Practice; Note-->Graph
 							</div>
 							<div className="flex items-center justify-end gap-3 border-t px-3 py-1 font-ui text-[10px] text-muted-foreground">
 								{activeMeta && activeMeta.tasks.total > 0 && <span>{activeMeta.tasks.done}/{activeMeta.tasks.total} tasks</span>}
-								<span>{(index.backlinks[active.path] ?? []).length} backlinks</span>
+								<button type="button" className="rounded px-1 hover:bg-accent hover:text-foreground" title="Show connections" onClick={focusConnections}>
+									{(index.backlinks[active.path] ?? []).length} backlinks
+								</button>
+								<button type="button" className="rounded px-1 hover:bg-accent hover:text-foreground" title="Show connections" onClick={focusConnections}>
+									{dedupe(activeMeta?.links ?? []).length} outgoing
+								</button>
 								<span>{Notes.wordCount(active.text)} words</span>
 								<span>{active.text.length} characters</span>
 								<span>{active.conflict ? "conflict" : active.text === active.saved ? "saved" : "saving…"}</span>
@@ -1118,33 +1287,49 @@ graph LR; Note-->Lesson; Note-->Practice; Note-->Graph
 				{/* Right sidebar */}
 				{rightOpen && (
 					<aside className={cn("flex w-72 shrink-0 flex-col border-l bg-card/40", narrow && "absolute inset-y-0 right-0 z-30 w-[85vw] max-w-80 bg-background shadow-2xl")} data-testid="notes-right">
-						<div className="flex items-center gap-0.5 border-b px-2 py-1.5">
-							{([["backlinks", Link2Icon, "Backlinks"], ["outgoing", WaypointsIcon, "Outgoing links"], ["outline", ListTreeIcon, "Outline"], ["graph", NetworkIcon, "Local graph"]] as const).map(([k, Icon, lbl]) => (
-								<IconBtn key={k} icon={Icon} label={lbl} active={rightTab === k} onClick={() => setRightTab(k)} />
+						<div className="flex items-center gap-0.5 border-b px-1.5 py-1.5" role="tablist" aria-label="Note relations">
+							{([["connections", "Connections"], ["outline", "Outline"], ["graph", "Local graph"]] as const).map(([k, lbl]) => (
+								<button
+									key={k}
+									type="button"
+									role="tab"
+									aria-selected={rightTab === k}
+									onClick={() => setRightTab(k)}
+									className={cn(
+										"min-w-0 flex-1 truncate rounded-md px-1 py-1 text-center font-ui text-[10px] uppercase tracking-wide",
+										rightTab === k ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+									)}
+								>
+									{lbl}
+								</button>
 							))}
 						</div>
 						<div className="min-h-0 flex-1 overflow-y-auto">
-							{!active?.path || active.kind !== "note" ? (
-								<Empty text="Open a note to see its links, outline and neighborhood." />
-							) : rightTab === "backlinks" ? (
-								<BacklinksPanel path={active.path} indexKey={index.files.length + ":" + (index.backlinks[active.path] ?? []).join("|")} onOpen={(p, line) => { open(p); if (line !== undefined) setTimeout(() => setTabs((ts) => ts.map((t) => (t.path === p ? { ...t, scrollTo: { line, nonce: Date.now() } } : t))), 150); }} onLinkMention={async (p) => {
-									const title = Notes.noteTitle(active.path!);
-									const r = await api<{ content: string; mtime: number }>(`/api/notes/file?path=${encodeURIComponent(p)}`);
-									const re = new RegExp(`(^|[^\\p{L}\\p{N}\\[])(${Notes.escapeRe(title)})(?=$|[^\\p{L}\\p{N}\\]])`, "iu");
-									const next = r.content.replace(re, (_m, pre: string, word: string) => `${pre}[[${word === title ? title : `${title}|${word}`}]]`);
-									if (next !== r.content) {
-										await api("/api/notes/file", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: p, content: next, baseMtime: r.mtime }) });
-										await refresh();
-										flash("Linked.");
-									}
-								}} />
-							) : rightTab === "outgoing" ? (
-								<div className="flex flex-col px-1 py-1">
-									{(activeMeta?.links ?? []).length === 0 && <Empty text="No outgoing links." />}
-									{dedupe(activeMeta?.links ?? []).map((l, i) => (
-										<Row key={i} icon={l.path ? (Notes.isNotePath(l.path) ? FileTextIcon : ImageIcon) : FilePlusIcon} label={l.path ? Notes.noteTitle(l.path) : l.target} detail={l.path ? (l.heading ? `› ${l.heading}` : undefined) : "not created yet"} muted={!l.path} onClick={() => (l.path ? open(l.path, { sub: l.heading ?? null }) : void createNote({ title: l.target, folder: prefs.newNoteFolder }))} />
-									))}
-								</div>
+							{rightTab === "connections" ? (
+								connectionPath ? (
+									<ConnectionsPanel
+										path={connectionPath}
+										meta={connectionMeta}
+										index={index}
+										indexKey={vaultStamp}
+										showRelated={showRelatedEdges}
+										relatedEdges={relatedEdges}
+										onOpenNote={(p, opts) => {
+											open(p, { sub: opts?.sub ?? null });
+											if (opts?.line !== undefined) {
+												const line = opts.line;
+												setTimeout(() => setTabs((ts) => ts.map((t) => (t.path === p ? { ...t, scrollTo: { line, nonce: Date.now() } } : t))), 150);
+											}
+										}}
+										onLinkMention={(p) => void linkMention(p)}
+										onCreate={(target) => void createNote({ title: target, folder: prefs.newNoteFolder })}
+										onLinkRelated={(p) => void linkRelated(p)}
+									/>
+								) : (
+									<Empty text="Open a note to see how it connects." />
+								)
+							) : !active?.path || active.kind !== "note" ? (
+								<Empty text="Open a note to see its outline and neighborhood." />
 							) : rightTab === "outline" ? (
 								<div className="flex flex-col py-1">
 									{Notes.extractHeadings(active.text).length === 0 && <Empty text="No headings." />}
@@ -1171,7 +1356,7 @@ graph LR; Note-->Lesson; Note-->Practice; Note-->Graph
 								</div>
 							) : (
 								<div className="h-full min-h-80">
-									<NotesGraph index={index} active={active.path} local compact onOpen={(p) => open(p)} />
+									<NotesGraph index={index} active={active.path} local compact showRelated={showRelatedEdges} relatedEdges={relatedEdges} onOpen={(p) => open(p)} />
 								</div>
 							)}
 						</div>
@@ -1313,12 +1498,12 @@ function Empty({ text }: { text: string }) {
 	return <div className="px-4 py-6 text-center font-ui text-xs text-muted-foreground">{text}</div>;
 }
 
-function Row({ icon: Icon, label, detail, active, muted, onClick }: { icon: LucideIcon; label: string; detail?: string; active?: boolean; muted?: boolean; onClick: () => void }) {
+function Row({ icon: Icon, label, detail, active, muted, ghost, onClick }: { icon: LucideIcon; label: string; detail?: string; active?: boolean; muted?: boolean; ghost?: boolean; onClick: () => void }) {
 	return (
-		<button type="button" onClick={onClick} className={cn("flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs hover:bg-accent", active ? "bg-accent text-foreground" : muted ? "text-muted-foreground/70" : "text-muted-foreground hover:text-foreground")}>
+		<button type="button" onClick={onClick} className={cn("flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs hover:bg-accent", ghost && "border border-dashed border-border", active ? "bg-accent text-foreground" : muted ? "text-muted-foreground/70" : "text-muted-foreground hover:text-foreground")}>
 			<Icon className="size-3 shrink-0" />
 			<span className="truncate">{label}</span>
-			{detail && <span className="ml-auto shrink-0 truncate pl-2 text-[10px] opacity-60">{detail}</span>}
+			{detail && <span className={cn("ml-auto shrink-0 truncate pl-2 text-[10px] opacity-60", ghost && "uppercase tracking-wider")}>{detail}</span>}
 		</button>
 	);
 }
@@ -1660,54 +1845,186 @@ function highlightRanges(text: string, ranges: [number, number][]) {
 	return out;
 }
 
-function BacklinksPanel({ path, indexKey, onOpen, onLinkMention }: { path: string; indexKey: string; onOpen: (p: string, line?: number) => void; onLinkMention: (p: string) => Promise<void> }) {
-	const [data, setData] = useState<{ linked: { path: string; title: string; hits: { line: number; snippet: string }[] }[]; mentions: { path: string; line: number; snippet: string }[] } | null>(null);
-	const [showMentions, setShowMentions] = useState(false);
+/** A tag plus its ancestors, so #proj/alpha shares #proj. */
+function tagForms(tags: readonly string[]): Map<string, string> {
+	const map = new Map<string, string>();
+	for (const t of tags) {
+		const parts = t.split("/").filter(Boolean);
+		for (let i = 1; i <= parts.length; i++) {
+			const sub = parts.slice(0, i).join("/");
+			const k = sub.toLowerCase();
+			if (!map.has(k)) map.set(k, sub);
+		}
+	}
+	return map;
+}
+
+function sharedByTag(notes: readonly Notes.NoteMeta[], path: string): { path: string; title: string; tags: string[] }[] {
+	const self = notes.find((n) => n.path === path);
+	if (!self) return [];
+	const mine = tagForms(self.tags);
+	if (mine.size === 0) return [];
+	const out: { path: string; title: string; tags: string[] }[] = [];
+	for (const n of notes) {
+		if (n.path === path) continue;
+		const tags: string[] = [];
+		const seen = new Set<string>();
+		for (const [k, label] of tagForms(n.tags)) {
+			if (!mine.has(k) || seen.has(k)) continue;
+			seen.add(k);
+			tags.push(mine.get(k) ?? label);
+		}
+		if (tags.length) out.push({ path: n.path, title: n.title, tags });
+	}
+	out.sort((a, b) => b.tags.length - a.tags.length || a.title.localeCompare(b.title));
+	return out;
+}
+
+function ConnSection({ title, count, empty, children }: { title: string; count: number; empty: string; children?: React.ReactNode }) {
+	return (
+		<section className="flex flex-col gap-1">
+			<h3 className="px-1 font-ui text-[10px] uppercase tracking-wider text-muted-foreground">
+				{title} · {count}
+			</h3>
+			{count === 0 ? <p className="px-1 py-1 font-ui text-xs text-muted-foreground">{empty}</p> : children}
+		</section>
+	);
+}
+
+function ConnectionsPanel({
+	path,
+	meta,
+	index,
+	indexKey,
+	showRelated,
+	relatedEdges,
+	onOpenNote,
+	onLinkMention,
+	onCreate,
+	onLinkRelated,
+}: {
+	path: string;
+	meta: Notes.NoteMeta | null;
+	index: Notes.VaultIndex;
+	indexKey: string;
+	showRelated: boolean;
+	relatedEdges: readonly Notes.RelatedEdge[];
+	onOpenNote: (path: string, opts?: { line?: number; sub?: string | null }) => void;
+	onLinkMention: (path: string) => void;
+	onCreate: (target: string) => void;
+	onLinkRelated: (path: string) => void;
+}) {
+	const [back, setBack] = useState<{ linked: { path: string; title: string; hits: { line: number; snippet: string }[] }[]; mentions: { path: string; line: number; snippet: string }[] } | null>(null);
+	const [related, setRelated] = useState<{ path: string; title: string; score: number }[] | null>(null);
 	useEffect(() => {
 		let alive = true;
+		setBack(null);
 		fetch(`/api/notes/backlinks?path=${encodeURIComponent(path)}`)
 			.then((r) => r.json())
-			.then((b) => alive && setData(b))
-			.catch(() => {});
+			.then((b) => alive && setBack(b))
+			.catch(() => alive && setBack({ linked: [], mentions: [] }));
 		return () => {
 			alive = false;
 		};
 	}, [path, indexKey]);
-	if (!data) return <Empty text="Loading…" />;
+	useEffect(() => {
+		let alive = true;
+		setRelated(null);
+		fetch(`/api/notes/related?path=${encodeURIComponent(path)}`)
+			.then((r) => r.json())
+			.then((b: { related?: { path: string; title: string; score: number }[] }) => alive && setRelated(b.related ?? []))
+			.catch(() => alive && setRelated([]));
+		return () => {
+			alive = false;
+		};
+	}, [path, indexKey]);
+	const outgoing = dedupe(meta?.links ?? []);
+	const shared = useMemo(() => sharedByTag(index.notes, path), [index, path]);
+	const topScore = related?.[0]?.score || 1;
 	return (
-		<div className="flex flex-col gap-1 px-2 py-2" data-testid="backlinks">
-			<div className="px-1 font-ui text-[10px] uppercase tracking-wider text-muted-foreground">Linked mentions · {data.linked.length}</div>
-			{data.linked.length === 0 && <div className="px-1 py-2 font-ui text-xs text-muted-foreground">No backlinks yet.</div>}
-			{data.linked.map((l) => (
-				<div key={l.path} className="flex flex-col rounded-md border bg-background/50 p-1.5">
-					<button type="button" onClick={() => onOpen(l.path)} className="truncate text-left text-xs font-medium hover:underline">
-						{l.title}
-					</button>
-					{l.hits.map((h) => (
-						<button key={h.line} type="button" onClick={() => onOpen(l.path, h.line)} className="mt-0.5 line-clamp-2 text-left text-[11px] text-muted-foreground hover:text-foreground">
-							{h.snippet}
-						</button>
-					))}
-				</div>
-			))}
-			<button type="button" onClick={() => setShowMentions((v) => !v)} className="mt-3 flex items-center gap-1 px-1 font-ui text-[10px] uppercase tracking-wider text-muted-foreground">
-				{showMentions ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
-				Unlinked mentions · {data.mentions.length}
-			</button>
-			{showMentions &&
-				data.mentions.map((m) => (
-					<div key={m.path} className="flex flex-col rounded-md border bg-background/50 p-1.5">
-						<div className="flex items-center gap-1">
-							<button type="button" onClick={() => onOpen(m.path, m.line)} className="truncate text-left text-xs font-medium hover:underline">
-								{Notes.noteTitle(m.path)}
+		<div className="flex flex-col" data-testid="connections">
+			<div className="px-3 pt-2 font-ui text-[10px] uppercase tracking-wider text-muted-foreground">Local graph</div>
+			<div className="mx-2 mb-2 h-40 overflow-hidden rounded-md border bg-background/40">
+				<NotesGraph index={index} active={path} local compact showRelated={showRelated} relatedEdges={relatedEdges} onOpen={(p) => onOpenNote(p)} />
+			</div>
+			<div className="flex flex-col gap-3 px-2 pb-4">
+				<ConnSection title="Linked mentions" count={back?.linked.length ?? 0} empty={back ? "No backlinks yet. Notes that link here show the linking line." : "Loading…"}>
+					{back?.linked.map((l) => (
+						<div key={l.path} className="flex flex-col rounded-md border bg-background/50 p-1.5" data-testid="backlinks">
+							<button type="button" onClick={() => onOpenNote(l.path)} className="truncate text-left text-xs font-medium hover:underline">
+								{l.title}
 							</button>
-							<button type="button" onClick={() => void onLinkMention(m.path)} className="ml-auto rounded border px-1.5 py-0.5 font-ui text-[10px] hover:bg-accent">
-								Link
-							</button>
+							{l.hits.map((h) => (
+								<button key={h.line} type="button" onClick={() => onOpenNote(l.path, { line: h.line })} className="mt-0.5 line-clamp-2 text-left text-[11px] text-muted-foreground hover:text-foreground">
+									{h.snippet}
+								</button>
+							))}
 						</div>
-						<div className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{m.snippet}</div>
-					</div>
-				))}
+					))}
+				</ConnSection>
+				<ConnSection title="Outgoing links" count={outgoing.length} empty="No outgoing links. Type [[ to link a note.">
+					{outgoing.map((l, i) => (
+						<Row
+							key={`${l.path ?? l.target}:${i}`}
+							ghost={!l.path}
+							icon={l.path ? (Notes.isNotePath(l.path) ? FileTextIcon : ImageIcon) : FilePlusIcon}
+							label={l.path ? Notes.noteTitle(l.path) : l.target}
+							detail={l.path ? (l.heading ? `› ${l.heading}` : undefined) : "Create"}
+							muted={!l.path}
+							onClick={() => (l.path ? onOpenNote(l.path, { sub: l.heading ?? (l.block ? `^${l.block}` : null) }) : onCreate(l.target))}
+						/>
+					))}
+				</ConnSection>
+				<ConnSection title="Unlinked mentions" count={back?.mentions.length ?? 0} empty={back ? "No plain-text mentions of this title." : "Loading…"}>
+					{back?.mentions.map((m) => (
+						<div key={m.path} className="flex flex-col rounded-md border bg-background/50 p-1.5">
+							<div className="flex items-center gap-1">
+								<button type="button" onClick={() => onOpenNote(m.path, { line: m.line })} className="truncate text-left text-xs font-medium hover:underline">
+									{Notes.noteTitle(m.path)}
+								</button>
+								<button type="button" onClick={() => onLinkMention(m.path)} className="ml-auto rounded border px-1.5 py-0.5 font-ui text-[10px] hover:bg-accent">
+									Link
+								</button>
+							</div>
+							<div className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{m.snippet}</div>
+						</div>
+					))}
+				</ConnSection>
+				<ConnSection title="Shared tags" count={shared.length} empty="No shared tags. Add #tag in a note, or a tags property.">
+					{shared.map((n) => (
+						<div key={n.path} className="flex flex-col rounded-md px-1 py-1">
+							<button type="button" onClick={() => onOpenNote(n.path)} className="truncate text-left text-xs font-medium hover:underline">
+								{n.title}
+							</button>
+							<div className="mt-0.5 flex flex-wrap gap-1">
+								{n.tags.map((t) => (
+									<span key={t} className="rounded bg-[var(--lh-tag-bg)] px-1 font-ui text-[10px] text-[var(--lh-tag)]">
+										#{t}
+									</span>
+								))}
+							</div>
+						</div>
+					))}
+				</ConnSection>
+				<ConnSection title="Related notes" count={related?.length ?? 0} empty={related ? "No similar notes yet. Write a bit more and suggestions show up here." : "Loading…"}>
+					{related?.map((r) => (
+						<div key={r.path} className="flex flex-col rounded-md border bg-background/50 p-1.5">
+							<button type="button" onClick={() => onOpenNote(r.path)} className="truncate text-left text-xs font-medium hover:underline">
+								{r.title}
+							</button>
+							<div className="mt-1 flex items-center gap-2">
+								<div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-accent" title={`${Math.round(r.score * 100)}% similar`}>
+									<div className="h-full rounded-full bg-[var(--lh-link)]" style={{ width: `${Math.max(8, Math.round((r.score / topScore) * 100))}%` }} />
+								</div>
+								<span className="shrink-0 font-ui text-[10px] tabular-nums text-muted-foreground">{Math.round(r.score * 100)}%</span>
+								<button type="button" onClick={() => onLinkRelated(r.path)} className="shrink-0 rounded border px-1.5 py-0.5 font-ui text-[10px] hover:bg-accent">
+									Link
+								</button>
+							</div>
+						</div>
+					))}
+				</ConnSection>
+			</div>
 		</div>
 	);
 }

@@ -100,14 +100,14 @@ export function ClaudeCodeInstallationStatus() {
 
 	return <div className="space-y-2" data-testid="claude-code-installation">
 		<div className="flex items-center gap-3">
-			<span className="font-prose text-(length:--lh-prose-size) text-foreground">Claude Code</span>
+			<span className="text-sm font-medium text-foreground">Claude Code</span>
 			<Toggle label="Claude Code" checked={enabled} disabled={!loaded || saving} onChange={(next) => void save(next)} />
 		</div>
 		{error && <p role="alert" className="text-xs text-red-400">{error}</p>}
 		{enabled && <>
 			<div className="flex flex-wrap items-center gap-3">
 				<span role="status" className="text-xs text-muted-foreground">{busy ? "Checking…" : claudeCodeStatusLabel(status)}</span>
-				<Button type="button" size="xs" variant="outline" className="cursor-pointer disabled:cursor-not-allowed" disabled={busy} onClick={() => void refresh()} data-testid="claude-code-check-again">Check again</Button>
+				<Button type="button" size="xs" variant="outline" className="cursor-pointer disabled:cursor-not-allowed text-sm" disabled={busy} onClick={() => void refresh()} data-testid="claude-code-check-again">Check again</Button>
 			</div>
 			<p className="text-xs leading-relaxed text-muted-foreground"><strong className="font-medium">Install and authenticate Claude Code in your terminal, then select a Claude Code model here.</strong> Meander starts it when needed—no background process required.</p>
 			<p className="text-xs leading-relaxed text-muted-foreground">Checks installation/version only—not authentication, model access, or quota. Claude Code controls billing. Requires v{CLAUDE_CODE_MINIMUM_VERSION}+. <a href="https://code.claude.com/docs/en/setup" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">Setup ↗</a></p>

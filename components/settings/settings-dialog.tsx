@@ -9,12 +9,21 @@
  *   appearance edits restyle the chat LIVE behind the dialog). Escape,
  *   backdrop, and ✕ all close. Modal-only — /settings redirects, so
  *   nothing links into a dead surface.
- * - Left section nav in the app's mono chrome (text-only, session-list
+ * - Left section nav in the app's quiet chrome (text-only, session-list
  *   language — active = bg-accent), no icons, matching the minimal-color
  *   doctrine.
  * - The dialog is surface-agnostic by construction: the sections talk to
  *   /api/settings* and localStorage only, so this shell can be re-mounted
  *   as a true OS window in the Electron round with near-zero churn.
+ *
+ * TYPOGRAPHY (settings typography normalization): ONE family and a fixed
+ * scale across the whole settings surface — the app's default sans
+ * (`font-sans`, inherited from this root; the menus and the connection
+ * dialogs it opens carry the same family because they portal out of it)
+ * and the app's type ladder: text-lg for the dialog title, text-sm for
+ * headings, row labels and controls, text-xs for hints and descriptions,
+ * text-[11px] for badges. Monospace is reserved for literal values the
+ * user copies (key masks, env var names, URLs, paths).
  *
  * The record + the single `write` seam moved here from the thin page:
  * one record instance for the whole dialog, sections write through it,
@@ -269,12 +278,16 @@ export function SettingsDialogBody({
 			aria-modal="true"
 			aria-label="Settings"
 			data-testid="settings-dialog"
-			className="settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] max-md:h-[92dvh] max-md:max-h-[92dvh] max-md:max-w-[96vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
+			className="settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] max-md:h-[92dvh] max-md:max-h-[92dvh] max-md:max-w-[96vw] flex-col overflow-hidden rounded-md border border-border bg-card font-sans text-sm shadow-xl"
 			onClick={(e) => e.stopPropagation()}
 		>
-			{/* Header — the app's quiet CMU title language. */}
+			{/* Header — one family with the rest of the dialog (the
+			    settings' typography normalization): the app's default sans,
+			    the ladder's text-lg rung. The CMU title language stays
+			    for the app's content titles (sessions), not for a
+			    settings chrome heading. */}
 			<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
-				<h2 className="font-title text-2xl tracking-tight">Settings</h2>
+				<h2 className="text-lg font-semibold text-foreground">Settings</h2>
 				<Hint
 						// Esc closes the dialog (its own listener) — surface it.
 						label="Close"
@@ -303,7 +316,8 @@ export function SettingsDialogBody({
 
 			<div className="flex min-h-0 flex-1 max-md:flex-col">
 				{/* Phone (2026-10-27): the nav becomes a scrollable tab row on top.
-				    Left nav — text-only, the session-list mono language,
+				    Left nav — text-only, the session-list language (now the
+				    settings' own sans, per the typography normalization),
 					    active = bg-accent. */}
 				<nav
 					aria-label="Settings sections"
@@ -316,7 +330,7 @@ export function SettingsDialogBody({
 							type="button"
 							data-testid={`settings-nav-${s.id}`}
 							aria-current={active === s.id}
-							className={`shrink-0 rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
+							className={`shrink-0 rounded-sm px-3 py-1.5 text-left text-sm transition-colors ${
 								active === s.id
 									? "bg-accent text-foreground"
 									: "text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -349,11 +363,11 @@ export function SettingsDialogBody({
 						</p>
 					)}
 					{record === undefined ? (
-						<p className="px-6 py-5 text-xs text-muted-foreground/70">
+						<p className="px-6 py-5 text-xs text-muted-foreground">
 							Loading settings…
 						</p>
 					) : record === null ? (
-						<p className="px-6 py-5 text-xs text-muted-foreground/70">
+						<p className="px-6 py-5 text-xs text-muted-foreground">
 							Settings could not be loaded — refresh to retry.
 						</p>
 					) : (
