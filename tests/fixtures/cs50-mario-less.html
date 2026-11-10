@@ -1,0 +1,102 @@
+<!--
+  A TRIMMED COPY of the real CS50 page (https://cs50.harvard.edu/x/psets/1/mario/less/), fetched 2026-11-09.
+  Only the content column (<main>) is kept, and the long "Advice" prose is
+  cut — the shape of the page is what the parsers read, and that is what
+  this fixture preserves. Never edited by hand beyond the trim.
+-->
+<main class="col-lg">
+
+                    <h1 id="mario">Mario</h1>
+
+<div class="ratio ratio-16x9" data-video=""><iframe allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen="" class="border" data-video="" src="https://www.youtube.com/embed/cWOkHQXw0JQ?modestbranding=0&amp;rel=0&amp;showinfo=0&amp;start=11"></iframe></div>
+
+<h2 id="problem-to-solve">Problem to Solve</h2>
+
+<p>Toward the end of World 1-1 in Nintendo’s <a href="https://en.wikipedia.org/wiki/Super_Mario_Bros.">Super Mario Bros.</a>, Mario must ascend right-aligned pyramid of bricks, as in the below.</p>
+
+<p><img src="pyramid.png" alt="screenshot of Mario jumping up a right-aligned pyramid"></p>
+
+<p>In a file called <code class="language-plaintext highlighter-rouge">mario.c</code> in a folder called <code class="language-plaintext highlighter-rouge">mario-less</code>, implement a program in C that recreates that pyramid, using hashes (<code class="language-plaintext highlighter-rouge">#</code>) for bricks, as in the below:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>       #
+      ##
+     ###
+    ####
+   #####
+  ######
+ #######
+########
+</code></pre></div></div>
+
+<p>But prompt the user for an <code class="language-plaintext highlighter-rouge">int</code> for the pyramid’s actual height, so that the program can also output shorter pyramids like the below:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>  #
+ ##
+###
+</code></pre></div></div>
+
+<p>Re-prompt the user, again and again as needed, if their input is not greater than 0 or not an <code class="language-plaintext highlighter-rouge">int</code> altogether.</p>
+
+<details><summary>Hints</summary><ul>
+  <li data-marker="*">Recall that you can get an <code class="language-plaintext highlighter-rouge">int</code> from a user with <code class="language-plaintext highlighter-rouge">get_int</code>, which is declared in <code class="language-plaintext highlighter-rouge">cs50.h</code>.</li>
+  <li data-marker="*">Recall that you can print a <code class="language-plaintext highlighter-rouge">string</code> with <code class="language-plaintext highlighter-rouge">printf</code>, which is declared in <code class="language-plaintext highlighter-rouge">stdio.h</code>.</li>
+</ul></details>
+
+<h2 id="demo">Demo</h2>
+
+<script async="" data-autoplay="1" data-cols="80" data-loop="1" data-rows="12" id="asciicast-WPrv7PFVLaLkJ2BU96uTEQKuA" src="https://asciinema.org/a/WPrv7PFVLaLkJ2BU96uTEQKuA.js"></script>
+
+<h2 id="advice">Advice</h2>
+
+<details><summary>Write some code that you know will compile</summary>
+<p>Even though this program won’t do anything, it should at least compile with <code>make</code>!</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#include &lt;cs50.h&gt;
+#include &lt;stdio.h&gt;
+
+int main(void)
+{
+
+}
+</code></pre></div></div>
+</details>
+
+<h2 id="walkthrough">Walkthrough</h2>
+
+<div class="alert" data-alert="info" role="alert"><p>Note this walkthrough specifies your program should prompt the user for a pyramid’s height and <em>re</em>-prompt if the user inputs a value less than 1 or greater than 8. The specification only requires you to re-prompt the user if they input a value less than 1.</p></div>
+
+<div class="ratio ratio-16x9" data-video=""><iframe allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen="" class="border" data-video="" src="https://www.youtube.com/embed/NAs4FIWkJ4s?modestbranding=0&amp;rel=0&amp;showinfo=0"></iframe></div>
+
+<h2 id="how-to-test">How to Test</h2>
+
+<p>Does your code work as prescribed when you input:</p>
+
+<ul>
+  <li data-marker="*">
+<code class="language-plaintext highlighter-rouge">-1</code> or other negative numbers?</li>
+  <li data-marker="*">
+<code class="language-plaintext highlighter-rouge">0</code>?</li>
+  <li data-marker="*">
+<code class="language-plaintext highlighter-rouge">1</code> or other positive numbers?</li>
+  <li data-marker="*">letters or words?</li>
+  <li data-marker="*">no input at all, when you only hit Enter?</li>
+</ul>
+
+<h3 id="correctness">Correctness</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>check50 cs50/problems/2026/x/mario/less
+</code></pre></div></div>
+
+<h3 id="style">Style</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>style50 mario.c
+</code></pre></div></div>
+
+<h2 id="how-to-submit">How to Submit</h2>
+
+<p>In your terminal, execute the below to submit your work, answering the prompts that come up as well.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>submit50 cs50/problems/2026/x/mario/less
+</code></pre></div></div>
+
+
+                </main>

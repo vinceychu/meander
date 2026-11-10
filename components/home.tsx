@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
+import { BookOpenIcon, CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
 import { GraphView } from "@/components/graph-view";
 import { MinimalHome } from "@/components/minimal-home";
 import { SetupDialog } from "@/components/setup-dialog";
@@ -319,24 +319,37 @@ export function Home({
 						dictationSlot={<DictationBar dictation={dictation} />}
 						turns={[] as TurnUsage[]}
 						leadingSlot={
-							<div className="flex items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5" data-testid="home-mode-switch">
-								{(["teach", "practice"] as const).map((m) => (
-									<button
-										key={m}
-										type="button"
-										data-testid={`home-mode-${m}`}
-										onClick={() => setMode(m)}
-										className={
-											"flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors " +
-											(mode === m
-												? "bg-accent text-foreground"
-												: "text-muted-foreground hover:text-foreground")
-										}
-									>
-										{m === "practice" ? <DumbbellIcon aria-hidden="true" className="size-3" /> : null}
-										{m === "teach" ? "Teach" : "Practice"}
-									</button>
-								))}
+							<div className="flex items-center gap-2">
+								{/* COURSES (2026-11-09): the prominent door into "take a
+								    whole course" — one prompt drafts the plan. */}
+								<button
+									type="button"
+									data-testid="home-learn-course"
+									onClick={() => router.push("/courses")}
+									className="flex items-center gap-1 rounded-md border border-border/60 bg-background px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+								>
+									<BookOpenIcon aria-hidden="true" className="size-3" />
+									Learn a course
+								</button>
+								<div className="flex items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5" data-testid="home-mode-switch">
+									{(["teach", "practice"] as const).map((m) => (
+										<button
+											key={m}
+											type="button"
+											data-testid={`home-mode-${m}`}
+											onClick={() => setMode(m)}
+											className={
+												"flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors " +
+												(mode === m
+													? "bg-accent text-foreground"
+													: "text-muted-foreground hover:text-foreground")
+											}
+										>
+											{m === "practice" ? <DumbbellIcon aria-hidden="true" className="size-3" /> : null}
+											{m === "teach" ? "Teach" : "Practice"}
+										</button>
+									))}
+								</div>
 							</div>
 						}
 					/>

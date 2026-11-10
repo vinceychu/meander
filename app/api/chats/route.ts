@@ -1,6 +1,6 @@
 import { chainsForSelection, formatChainLine } from "@/src/core";
 import { newGraphContextMessage, type GraphContextPick } from "@/src/core";
-import { cliToolsInfo, compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt } from "@/src/server";
+import { bindChat, cliToolsInfo, compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt } from "@/src/server";
 import type { ChatListItem } from "@/src/core";
 
 /** The session picker's list: record-derived summaries (phase, pending
@@ -20,7 +20,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-	const body = (await req.json().catch(() => ({}))) as { title?: unknown; kind?: unknown; graphContext?: unknown; tools?: unknown };
+	const body = (await req.json().catch(() => ({}))) as { title?: unknown; kind?: unknown; graphContext?: unknown; tools?: unknown; courseId?: unknown; problemId?: unknown };
 	const title = typeof body.title === "string" ? body.title : "";
 	// Practice sessions (owner, 2026-10-04): kind "practice" marks the
 	// record — the practice agent + its tools from turn 1, no extraction.
@@ -40,6 +40,12 @@ export async function POST(req: Request) {
 		const tools = body.tools.filter((t): t is string => typeof t === "string" && known.has(t));
 		if (tools.length > 0) stores.chatStore.saveTools(chat.id, [...new Set(tools)]);
 	}
+	// THE COURSE BINDING (2026-11-09): a session started from a course (or
+	// from one of its problems) is bound at creation, so the tutor knows the
+	// course and the problem without the learner re-explaining either.
+	const courseId = typeof body.courseId === "string" ? body.courseId.trim() : "";
+	const problemId = typeof body.problemId === "string" ? body.problemId.trim() : "";
+	if (courseId) bindChat(chat.id, { courseId, ...(problemId ? { problemId } : {}) });
 	const strong = readSettingsRecord()?.models?.strong;
 	if (strong?.model) {
 		stores.chatStore.saveSettings(chat.id, {

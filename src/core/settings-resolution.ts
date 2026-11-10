@@ -37,6 +37,7 @@ import {
 	type GeneralSettings,
 	type DictationSettings,
 	type CompactionSettings,
+	type CoursesSettings,
 	type CustomModel,
 	type CustomModelOverride,
 	type GraphSettings,
@@ -101,6 +102,9 @@ export interface EffectiveSettings {
 	/** Custom endpoint, resolved concrete: baseUrl defaults "", models and
 	 *  user pins default to empty. */
 	customProvider: { baseUrl: string; models: CustomModel[]; overrides: Record<string, CustomModelOverride>; manualModels: string[] };
+	/** The courses knobs (2026-11-09): the workspace root, the VS Code host
+	 *  and the default way a problem is done. */
+	courses: Required<CoursesSettings>;
 }
 
 /** The conversation pair's chain (BYOK, owner 2026-09-22): the chat's own
@@ -229,6 +233,11 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
+		},
+		courses: {
+			workspaceRoot: record?.courses?.workspaceRoot ?? FACTORY_SETTINGS.courses.workspaceRoot,
+			vscodeHost: record?.courses?.vscodeHost ?? FACTORY_SETTINGS.courses.vscodeHost,
+			defaultMode: record?.courses?.defaultMode ?? FACTORY_SETTINGS.courses.defaultMode,
 		},
 		customProvider: {
 			baseUrl: record?.customProvider?.baseUrl ?? "",

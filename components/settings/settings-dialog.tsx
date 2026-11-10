@@ -45,6 +45,7 @@ import {
 	type AgentSettings,
 	type AppearanceSettings,
 	type CompactionSettings,
+	type CoursesSettings,
 	type GraphSettings,
 	type UserSettings,
 } from "@/src/core";
@@ -59,6 +60,7 @@ import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
+import { CoursesSection } from "./courses-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 
@@ -70,6 +72,7 @@ const SECTIONS = [
 	{ id: "agent", label: "Agent" },
 	{ id: "appearance", label: "Appearance" },
 	{ id: "graph", label: "Graph" },
+	{ id: "courses", label: "Courses" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
 	{ id: "general", label: "General" },
 ] as const;
@@ -237,7 +240,7 @@ export function SettingsDialogBody({
 	 *  schema mistake caught by the validation surface). */
 	const write = useCallback(
 		async (
-			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction",
+			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction" | "courses",
 			body: object,
 		) => {
 			setError(null);
@@ -436,6 +439,14 @@ export function SettingsDialogBody({
 										onSectionChange={(next: GraphSettings) =>
 											void write("graph", next)
 										}
+									/>
+								</SettingsSection>
+							)}
+							{active === "courses" && (
+								<SettingsSection title="Courses" testid="section-courses">
+									<CoursesSection
+										courses={record.courses}
+										onSectionChange={(next: CoursesSettings) => void write("courses", next)}
 									/>
 								</SettingsSection>
 							)}

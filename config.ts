@@ -33,11 +33,24 @@ export const PATHS = {
 	 *  per tool, attachable to practice sessions (src/server/cli-tools.ts).
 	 *  Lives in the data dir, so it syncs across devices with everything else. */
 	tools: path.join(DATA_ROOT, "tools"),
+	/** The learner tools the APP ships (2026-11-09): the cs50 grader's
+	 *  manifest + script + setup script live in the repo and are copied
+	 *  into the data dir's tools/ the first time they are needed, so a
+	 *  fresh install can already grade a problem set. Read-only in the
+	 *  repo; the data-dir copy is the one that runs (and the one a
+	 *  learner may edit). */
+	shippedTools: path.join(ROOT, "learner-tools"),
 	/** The default notes vault (2026-11-06): plain Markdown files, Obsidian
 	 *  compatible; syncs with the data folder. notes-vault.json can point the
 	 *  app at another folder (e.g. an existing Obsidian vault). */
 	notes: path.join(DATA_ROOT, "notes"),
 	notesVaultConfig: path.join(DATA_ROOT, "notes-vault.json"),
+	/** COURSES (2026-11-09): one folder per course —
+	 *  <courses>/<courseId>/course.json (the plan), progress.json (the
+	 *  learner's per-problem progress) and pages/ (the fetched syllabus
+	 *  pages, cached so a course works offline after the first fetch).
+	 *  Lives in the data dir, so it syncs with the chats. */
+	courses: path.join(DATA_ROOT, "courses"),
 } as const;
 
 // ─── Models ────────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { DownloadIcon, FlameIcon } from "lucide-react";
 import type { NotesProgress, StudyStats } from "@/src/core";
 import { SidebarToggle } from "@/components/sidebar";
+import { CoursesStatsSection } from "@/components/courses/courses-stats-section";
 
 /**
  * STUDY STATS PAGE (fork, 2026-10-27) — GET /api/stats rendered as tiles
@@ -168,6 +169,9 @@ export function StatsView() {
 				</div>
 
 				{progress ? <NotesProgressSection progress={progress} /> : null}
+
+				{/* COURSES (2026-11-09): where the learner stands in each course. */}
+				<CoursesStatsSection />
 
 				{failed ? <p className="mt-6 text-sm text-muted-foreground">Couldn&apos;t load stats.</p> : null}
 				{!stats && !failed ? <p className="mt-6 text-sm text-muted-foreground">Loading…</p> : null}

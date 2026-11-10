@@ -98,3 +98,7 @@ export * from "./anki.ts";
 // Notes vault (2026-11-06): namespaced — its small path helpers would clash.
 export * as Notes from "./notes.ts";
 export * from "./notes-progress.ts";
+// Courses (2026-11-09): the domain model (a syllabus of units, the
+// progress map, the plan helpers) — browser-safe, so the shell can render
+// a course's units, its next step and its progress.
+export * from "./courses.ts";
