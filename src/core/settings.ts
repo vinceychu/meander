@@ -468,6 +468,21 @@ export interface CompactionSettings {
 	thresholdTokens?: number;
 }
 
+/**
+ * COURSES (2026-11-09): where a course's problem folders are created and
+ * how VS Code is reached. `workspaceRoot` is the parent of the per-problem
+ * folders ("~/cs50" → ~/cs50/mario-less); `vscodeHost` is the SSH host the
+ * remote VS Code link points at (the machine the server runs on).
+ */
+export interface CoursesSettings {
+	/** Where the problem folders are created ("~" and "~/…" are expanded). */
+	workspaceRoot?: string;
+	/** The SSH host for the `vscode://vscode-remote/ssh-remote+` link. */
+	vscodeHost?: string;
+	/** How a problem is done by default: in the app, or in VS Code. */
+	defaultMode?: "app" | "vscode";
+}
+
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
@@ -484,6 +499,9 @@ export interface UserSettings {
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
+	/** The courses section (2026-11-09): the workspace root, the VS Code
+	 *  host and the default way a problem is done. */
+	courses?: CoursesSettings;
 	[key: string]: unknown;
 }
 
@@ -510,6 +528,7 @@ export interface FactorySettings {
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
+	courses: Required<CoursesSettings>;
 }
 
 export const FACTORY_SETTINGS: FactorySettings = {
@@ -526,6 +545,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
+	courses: { workspaceRoot: "~/cs50", vscodeHost: "5090v1", defaultMode: "app" },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -805,6 +825,22 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
+/** The courses section (2026-11-09): the workspace root and the VS Code
+ *  host are plain strings (a path the user owns — the sanitizer does not
+ *  resolve it; the server does, and refuses a relative path), the default
+ *  mode is one of two words. Invalid values drop to the factory default. */
+function sanitizeCourses(raw: Record<string, unknown>): CoursesSettings {
+	const out: CoursesSettings = {};
+	if (typeof raw.workspaceRoot === "string" && raw.workspaceRoot.trim()) {
+		out.workspaceRoot = raw.workspaceRoot.trim();
+	}
+	if (typeof raw.vscodeHost === "string" && raw.vscodeHost.trim()) {
+		out.vscodeHost = raw.vscodeHost.trim();
+	}
+	if (raw.defaultMode === "app" || raw.defaultMode === "vscode") out.defaultMode = raw.defaultMode;
+	return out;
+}
+
 /**
  * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
  * known fields validated strictly (invalid ones drop/clamp per module doc),
@@ -851,6 +887,9 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 		if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
 			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 		}
+	}
+	if (r.courses !== null && typeof r.courses === "object" && !Array.isArray(r.courses)) {
+		out.courses = sanitizeCourses(r.courses as Record<string, unknown>);
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old

@@ -19,6 +19,7 @@ import type {
 	AppearanceSettings,
 	BackgroundModelRole,
 	CompactionSettings,
+	CoursesSettings,
 	CustomModelOverride,
 	GeneralSettings,
 	DictationSettings,
@@ -407,6 +408,42 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
+/** courses: { workspaceRoot?: string; vscodeHost?: string; defaultMode?: "app" | "vscode" }
+ *
+ *  Strict on every known field (a bad type is a 400, never a silent
+ *  clamp): the workspace root must be an absolute path or "~"-anchored
+ *  (the server refuses a relative one — a relative root would scatter
+ *  the learner's problem folders across the cwd), the host a non-empty
+ *  string, the mode one of the two words. */
+export function parseCoursesSettingsBody(body: unknown): SettingsBodyResult<CoursesSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: CoursesSettings = {};
+	if (raw.workspaceRoot !== undefined) {
+		if (typeof raw.workspaceRoot !== "string" || !raw.workspaceRoot.trim()) {
+			return { ok: false, error: "workspaceRoot must be a non-empty path" };
+		}
+		const root = raw.workspaceRoot.trim();
+		if (root !== "~" && !root.startsWith("~/") && !root.startsWith("/")) {
+			return { ok: false, error: "workspaceRoot must be an absolute path or start with ~/" };
+		}
+		settings.workspaceRoot = root;
+	}
+	if (raw.vscodeHost !== undefined) {
+		if (typeof raw.vscodeHost !== "string" || !raw.vscodeHost.trim()) {
+			return { ok: false, error: "vscodeHost must be a non-empty string" };
+		}
+		settings.vscodeHost = raw.vscodeHost.trim();
+	}
+	if (raw.defaultMode !== undefined) {
+		if (raw.defaultMode !== "app" && raw.defaultMode !== "vscode") {
+			return { ok: false, error: 'defaultMode must be "app" or "vscode"' };
+		}
+		settings.defaultMode = raw.defaultMode;
+	}
+	return { ok: true, settings };
+}
+
 /** dictation: { language?: one of Nova-3's supported language codes } */
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
@@ -464,6 +501,7 @@ export const SETTINGS_SECTIONS = {
 	appearance: parseAppearanceSettingsBody,
 	graph: parseGraphSettingsBody,
 	compaction: parseCompactionSettingsBody,
+	courses: parseCoursesSettingsBody,
 	models: parseModelsSettingsBody,
 	dictation: parseDictationSettingsBody,
 	claudeCode: parseClaudeCodeSettingsBody,

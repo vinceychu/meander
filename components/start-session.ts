@@ -5,6 +5,12 @@ interface SessionCreation {
 	kind?: "practice";
 	graphContext?: { propositions: readonly { id: string; name: string; statement: string }[] };
 	tools?: readonly string[];
+	/** The course this session is about (2026-11-09): the session is bound
+	 *  to it at creation, so the tutor knows the course without being told
+	 *  again ("the next problem" needs no re-explaining). */
+	courseId?: string;
+	/** The problem the session is opened on (inside the course). */
+	problemId?: string;
 }
 
 /** Per source-composer instance. Retain a successful creation if storage

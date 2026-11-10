@@ -24,6 +24,7 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
+import { CoursesSidebarSection } from "@/components/courses/courses-sidebar-section";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -888,6 +889,9 @@ function SessionsSidebar() {
 					    New session — quiet, bottom-pinned, opens the centered
 					    dialog (also mod+, in the keyboard registry). */}
 					<div className="flex flex-col gap-0.5 px-3 pb-3 pt-1">
+						{/* COURSES (2026-11-09): the active course + its next step,
+						    in the same row language as the other entries. */}
+						<CoursesSidebarSection />
 						{/* Notes + Graph sit on their own row so the labeled Graph link fits beside Notes. */}
 						<div className="flex items-center gap-1">
 							<Suspense fallback={<NotesNavButtons notesActive={!!pathname?.startsWith("/notes")} graphActive={false} />}>

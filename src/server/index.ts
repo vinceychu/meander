@@ -52,6 +52,11 @@ export { subscriptionControlsResponse, subscriptionBrowserResponse } from "./web
 export { sessionCost } from "./pricing.ts";
 export * from "./review.ts";
 export * from "./cli-tools.ts";
+// Courses (2026-11-09): the syllabus fetch, the page cache, the workspace
+// (the in-app editor's files), the run step, the grader and the VS Code
+// links. The app's routes and pages talk to the course service through
+// this barrel.
+export * from "./courses.ts";
 export * from "./find.ts";
 export * from "./import-folder.ts";
 export { claudeCodeInstallationResponse } from "./claude-code.ts";

@@ -19,7 +19,60 @@ export interface CliToolsListing {
 	errors: Record<string, string[]>;
 }
 
+/** The shipped tools that have already been copied into the data dir. */
+const seededDirs = new Set<string>();
+
+/**
+ * THE SHIPPED LEARNER TOOLS (2026-11-09) — the app's own tools, copied
+ * from the repo's learner-tools/ into the data dir's tools/ the first
+ * time the tools are looked at.
+ *
+ * The cs50 grader ships with the app: its manifest (a default tool, so
+ * every session can call it) and its script (the thing the manifest
+ * runs). The copy is NEVER overwritten — a learner who edited the
+ * script keeps their edit, and a learner who deleted the tool keeps it
+ * deleted. Returns the file names that were copied.
+ */
+export function ensureDefaultCliTools(
+	dir: string = PATHS.tools,
+	source: string = PATHS.shippedTools,
+): string[] {
+	if (seededDirs.has(dir)) return [];
+	seededDirs.add(dir);
+	const copied: string[] = [];
+	let entries: string[];
+	try {
+		entries = fs.readdirSync(source);
+	} catch {
+		return copied; // a packaged build without the folder: nothing to ship
+	}
+	try {
+		fs.mkdirSync(dir, { recursive: true });
+	} catch {
+		return copied;
+	}
+	for (const name of entries) {
+		const from = path.join(source, name);
+		const to = path.join(dir, name);
+		try {
+			const stat = fs.statSync(from);
+			if (!stat.isFile()) continue;
+			// Only the runnable parts ship (the README is documentation).
+			if (!/\.(json|py|sh)$/i.test(name)) continue;
+			// The learner's copy wins, always.
+			if (fs.existsSync(to)) continue;
+			fs.copyFileSync(from, to);
+			fs.chmodSync(to, name.endsWith(".py") || name.endsWith(".sh") ? 0o755 : 0o644);
+			copied.push(name);
+		} catch {
+			// A file that will not copy is skipped, not fatal.
+		}
+	}
+	return copied;
+}
+
 export function loadCliTools(dir: string = PATHS.tools): CliToolsListing {
+	if (dir === PATHS.tools) ensureDefaultCliTools();
 	const tools: CliToolManifest[] = [];
 	const errors: Record<string, string[]> = {};
 	let files: string[] = [];

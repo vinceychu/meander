@@ -14,6 +14,7 @@ import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
+import { BookOpenIcon } from "lucide-react";
 import type { ChatSettings, GraphSnapshot } from "@/src/core";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
@@ -80,6 +81,7 @@ export function DraftShell({
 	onOpenPicker,
 	onClearPicks,
 	overlay,
+	onLearnCourse,
 }: {
 	busy: boolean;
 	text: string;
@@ -107,6 +109,9 @@ export function DraftShell({
 	 *  the graph view (the overlay fills its column, never the sidebar).
 	 *  Passed as a node so the pick state stays in NewSession. */
 	overlay?: ReactNode;
+	/** COURSES (2026-11-09): the shell has no router (it is the pure
+	 *  render-test seam) — the parent owns the navigation. */
+	onLearnCourse?: () => void;
 }) {
 	// Voice dictation (STT wave, 2026-09-17): finals append at the end of the
 	// draft text (via the parent's onChange — the truth lives there); the
@@ -188,6 +193,17 @@ export function DraftShell({
 									)}
 									setup={setupCta}
 								/>
+								{/* COURSES (2026-11-09): the same door as home — one
+								    prompt drafts a whole course's plan. */}
+								<button
+									type="button"
+									data-testid="new-session-learn-course"
+									onClick={onLearnCourse}
+									className="pointer-events-auto mb-1.5 flex w-fit items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1 font-ui text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+								>
+									<BookOpenIcon className="size-3" />
+									Learn a course
+								</button>
 								{startError && <p role="alert" className="pointer-events-auto mb-2 text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
 								<div data-attachment-composer="" className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
 									<Composer
@@ -330,6 +346,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				picks={picks}
 				onOpenPicker={openPicker}
 				onClearPicks={() => applyPicks([])}
+				onLearnCourse={() => router.push("/courses")}
 				overlay={
 					// THE PICKER (owner round 10b): hosted INSIDE the content
 					// column — absolute inset-0 resolves to the column's relative

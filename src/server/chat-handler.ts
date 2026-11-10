@@ -54,6 +54,7 @@ import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.
 import { emit } from "../core/events.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
 import { cliAgentTools, defaultCliAgentTools } from "./cli-tools.ts";
+import { courseService } from "./courses.ts";
 import { asAgentMessages } from "../core/native-messages.ts";
 import {
 	ChatInputError,
@@ -508,6 +509,8 @@ export async function handleChatInput(
 						// = no research tool in the teacher's registry.
 						searchAvailable,
 						extraTools: defaultCliAgentTools(),
+						// The course planner (2026-11-09): the teacher writes the plan.
+						courses: courseService,
 					},
 					agentOpts,
 				)
@@ -527,6 +530,9 @@ export async function handleChatInput(
 						// graph master switch AND the agent.graphTools toggle.
 						...(graphToolsEnabled(effective) ? { graphStore: stores.graphStore } : {}),
 						extraTools: defaultCliAgentTools(),
+						// The course planner (2026-11-09): the prober owns the FIRST turn,
+						// so "I want to learn CS50" has to have a route here.
+						courses: courseService,
 					},
 					agentOpts,
 				);

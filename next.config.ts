@@ -101,6 +101,11 @@ const nextConfig: NextConfig = {
 			"node_modules/@earendil-works/pi-ai/dist/auth/oauth/{load,github-copilot,xai,device-code}.js",
 			"node_modules/@earendil-works/pi-ai/dist/utils/sleep.js",
 			"node_modules/@earendil-works/pi-agent-core/dist/**/*.json",
+			// COURSES (2026-11-09): the learner tools the app ships — the
+			// cs50 grader's manifest + script + setup script. They are read
+			// from disk at runtime (copied into the data dir's tools/), so
+			// the tracer cannot see them.
+			"learner-tools/**/*",
 			// Next 16.3.2 native Turbopack applies unanchored excludes while
 			// traversing modules; **/data/**/* still prunes gcp-metadata and
 			// its private runtime chain. Includes are applied after traversal.

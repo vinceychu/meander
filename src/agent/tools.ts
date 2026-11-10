@@ -18,6 +18,8 @@ import type { JobStore } from "../core/ports.ts";
 import { jobTools, type DemoInput, type PdfInput, type ResearchInput, type VisualInput } from "./tools/jobs.ts";
 import { planTools, type PlanToolContext } from "./tools/plan.ts";
 import { probeDoneTool, type ProbeDoneContext } from "./tools/probe.ts";
+import { courseTools, type CourseToolContext } from "./tools/course.ts";
+import type { CourseService } from "../core/courses.ts";
 import { proberGraphTools } from "./tools/graph.ts";
 import { readTool } from "./tools/read.ts";
 import { lsTool } from "./tools/ls.ts";
@@ -268,6 +270,9 @@ export interface ProberToolContext extends ProbeDoneContext {
 	/** The learner's default CLI tools (data/tools/*.json with "default": true),
 	 *  e.g. lab graders — available in teaching sessions too (2026-10-28). */
 	extraTools?: Record<string, AgentTool<any>>;
+	/** The course service (the seam to src/server/courses.ts) — present when
+	 *  the app has courses wired, which is the shipped default. */
+	courses?: CourseService;
 	/** Creates the job record (deduped by toolCallId). */
 	jobStore: JobStore;
 	/** Fire the background runner for a freshly created job. */
@@ -323,6 +328,10 @@ export function createProberTools(
 			{
 				...quizzing,
 				ask_user_question: askUserQuestionTool,
+				// The course planner (2026-11-09): the prober owns the FIRST
+				// turn, so "I want to learn CS50" must have a route before the
+				// probe concludes — the tool is registered for both agents.
+				...(ctx.courses ? courseTools({ chatId: ctx.chatId, courses: ctx.courses }) : {}),
 				// The learner-filesystem set is always-on (user-decided 2026-09,
 				// sources v1): the prober inspects and LOCATES learner-referenced
 				// files while assessing the edge. Read-only by construction.
@@ -398,6 +407,9 @@ export interface TeacherToolContext extends PlanToolContext {
 	/** The learner's default CLI tools (data/tools/*.json with "default": true),
 	 *  e.g. lab graders — available in teaching sessions too (2026-10-28). */
 	extraTools?: Record<string, AgentTool<any>>;
+	/** The course service (the seam to src/server/courses.ts) — present when
+	 *  the app has courses wired, which is the shipped default. */
+	courses?: CourseService;
 	/** Job-tool wiring (sub-agent dispatch): the job store + the runner's
 	 *  spawn seam. The composition root injects both. */
 	jobStore: JobStore;
@@ -456,6 +468,9 @@ export function createTeacherTools(
 			{
 			...quizzing,
 			ask_user_question: askUserQuestionTool,
+			// The course planner (2026-11-09) — the teacher's half of the
+			// course flow (the prober's half routes the request in).
+			...(ctx.courses ? courseTools({ chatId: ctx.chatId, courses: ctx.courses }) : {}),
 			// The learner-filesystem set is always-on (user-decided 2026-09,
 			// sources v1): the teacher locates and reads learner-referenced
 			// files on its own terms — nothing auto-injects. Read-only by

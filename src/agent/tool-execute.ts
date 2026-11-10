@@ -56,6 +56,7 @@ function runWithAbortGuard<T>(
 	toolName: string,
 	run: (signal: AbortSignal) => T | Promise<T>,
 	parent: AbortSignal | undefined,
+	timeoutOverrideMs?: number,
 ): Promise<T> {
 	const controller = new AbortController();
 	const forwardAbort = () => controller.abort();
@@ -63,7 +64,7 @@ function runWithAbortGuard<T>(
 		if (parent.aborted) controller.abort();
 		else parent.addEventListener("abort", forwardAbort, { once: true });
 	}
-	const timeoutMs = toolTimeoutMs.current;
+	const timeoutMs = timeoutOverrideMs ?? toolTimeoutMs.current;
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	const humanTimeout = timeoutMs >= 1_000 ? `${Math.round(timeoutMs / 1000)}s` : `${timeoutMs}ms`;
 	let graceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -197,6 +198,7 @@ export function serverExecute<P extends TSchema>(
 	toolName: string,
 	schema: P,
 	run: (input: Static<P>, ctx: ToolExecuteContext) => unknown,
+	opts?: { timeoutMs?: number },
 ): AgentTool<any>["execute"] {
 	// The returned execute is deliberately typed loose (params: unknown) so
 	// it satisfies every AgentTool slot — heterogeneous registries type
@@ -205,9 +207,17 @@ export function serverExecute<P extends TSchema>(
 	// validated arguments against `schema` (runtime) and `run` keeps the
 	// precise Static<P> input; `schema` exists in the signature precisely so
 	// P infers from the call site, not the loose surface.
+	// `opts.timeoutMs` raises the per-call ceiling for the tools whose work
+	// legitimately takes longer than a model call (the course planner
+	// fetches a whole syllabus); the default stays the 30s system timeout.
 	return async (toolCallId, input: unknown, signal) =>
 		toToolResult(
-			await runWithAbortGuard(toolName, (toolSignal) => run(input as Static<P>, { toolCallId, signal: toolSignal }), signal),
+			await runWithAbortGuard(
+				toolName,
+				(toolSignal) => run(input as Static<P>, { toolCallId, signal: toolSignal }),
+				signal,
+				opts?.timeoutMs,
+			),
 		);
 }
 
