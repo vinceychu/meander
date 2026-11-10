@@ -9,10 +9,12 @@ import {
 	progressKey,
 	type Course,
 	type CourseProblem,
+	type CourseRequest,
 	type CourseService,
 	type CourseUnit,
 	type CourseVideoSegment,
 } from "../../core/courses.ts";
+import { graderLabel, graderOf } from "../../core/course-adapters.ts";
 import { formatTimestamp } from "../../core/course-parse.ts";
 
 /**
@@ -93,7 +95,7 @@ const coursePlanInput = Type.Object({
 		],
 		{ description: "outline = fetch the syllabus and read it; notes = one unit's notes; segments = one lecture's timeline; commit = write the plan; status = the learner's progress; progress = record what happened on a problem (an attempt, a hint, a solution); workspace = set a problem's files up." },
 	),
-	course: Type.Optional(Type.String({ description: "The course id (default: the course this session is already on, else 'cs50x')." })),
+	course: Type.Optional(Type.String({ description: "The course: a catalogue id ('cs50x'), a course URL, or a course name (default: the course this session is already on, else 'cs50x')." })),
 	unitId: Type.Optional(Type.String({ description: "The unit (notes / segments)." })),
 	problemId: Type.Optional(Type.String({ description: "The problem (workspace / progress)." })),
 	status: Type.Optional(
@@ -154,6 +156,8 @@ function outlineOf(course: Course) {
 				specUrl: problem.specUrl,
 				videoEmbeds: problem.videoEmbeds ?? [],
 				estimateMinutes: problem.estimateMinutes,
+				grader: graderOf(problem),
+				graderLabel: graderLabel(problem),
 			})),
 		})),
 	};
@@ -244,7 +248,7 @@ export function courseTools(ctx: CourseToolContext): Record<string, AgentTool<an
 			label: "course_plan",
 			description:
 				"Plan a whole course for the learner: fetch the syllabus, read the notes, pick the video segments, decide which problems to do, and write the plan. " +
-				"Actions: 'outline' (fetch the course's units, notes links, problems and grading slugs — cached on disk, so it works offline afterwards), " +
+				"Actions: 'outline' (fetch the course's units, notes links, problems and graders — cached on disk, so it works offline afterwards; the course may be a catalogue id, a course URL or a course name), " +
 				"'notes' (one unit's notes, to build its lesson from), 'segments' (one lecture's timeline: the real timestamps a video slice may point at), " +
 				"'commit' (write the plan: per unit a condensed lesson, 2-5 video slices, the problems to do, the time estimates), " +
 				"'status' (the learner's progress and the next step), 'progress' (record an attempt, a hint or a solution shown), " +
@@ -255,7 +259,7 @@ export function courseTools(ctx: CourseToolContext): Record<string, AgentTool<an
 				"course_plan",
 				coursePlanInput,
 				async ({ action, course: requested, unitId, problemId, units, status, attempt, attempts, hint, solutionShown, lastCheck }) => {
-					const courseId = resolveCourseId(ctx, requested);
+					let courseId = resolveCourseId(ctx, requested);
 					if (action === "status") {
 						const course = ctx.courses.getCourse(courseId);
 						if (!course) {
@@ -283,11 +287,27 @@ export function courseTools(ctx: CourseToolContext): Record<string, AgentTool<an
 						};
 					}
 					if (action === "outline") {
-						let course = ctx.courses.getCourse(courseId);
-						if (!course || course.units.length === 0) {
-							course = await ctx.courses.buildCourse(courseId);
+						// The reference the learner gave: a catalogue id, a
+						// course URL or a course name. A reference that names
+						// a DIFFERENT course wins over the chat's binding.
+						let targetId = courseId;
+						let request: CourseRequest | undefined;
+						if (requested?.trim()) {
+							const resolved = await ctx.courses.resolveCourse(requested.trim());
+							targetId = resolved.courseId;
+							request = {
+								courseId: resolved.courseId,
+								ref: resolved.ref,
+								source: resolved.source,
+								title: resolved.title,
+								...(resolved.edition ? { edition: resolved.edition } : {}),
+							};
 						}
-						ctx.courses.bindChat(ctx.chatId, { courseId });
+						let course = ctx.courses.getCourse(targetId);
+						if (!course || course.units.length === 0) {
+							course = await ctx.courses.buildCourse(targetId, request);
+						}
+						ctx.courses.bindChat(ctx.chatId, { courseId: targetId });
 						return {
 							ok: true,
 							...outlineOf(course),
@@ -295,6 +315,12 @@ export function courseTools(ctx: CourseToolContext): Record<string, AgentTool<an
 								"Ask the learner TWO quick questions (ask_user_question, one per turn): (1) what they have already done with this material, " +
 								"(2) their time budget and whether they want any video at all. Then write the plan and commit it.",
 						};
+					}
+					// A reference that names a course the session is not on
+					// (a URL, a name) resolves to its own id.
+					if (!ctx.courses.getCourse(courseId) && requested?.trim()) {
+						const resolved = await ctx.courses.resolveCourse(requested.trim());
+						courseId = resolved.courseId;
 					}
 					const course = ctx.courses.getCourse(courseId);
 					if (!course) {
@@ -362,15 +388,23 @@ export function courseTools(ctx: CourseToolContext): Record<string, AgentTool<an
 						if (!problemId) return { ok: false, error: "workspace needs a problemId." };
 						const found = findProblem(course, problemId);
 						if (!found) return { ok: false, error: `No problem "${problemId}" in ${courseId}.` };
-						const prepared = ctx.courses.prepareProblem(course, found.problem);
+						const prepared = await ctx.courses.prepareProblem(course, found.problem);
+						const kind = graderOf(found.problem);
 						return {
 							ok: true,
 							problemId: found.problem.id,
 							folder: prepared.folder,
 							created: prepared.created,
 							files: found.problem.files.map((file) => file.name),
+							grader: kind,
+							graderLabel: graderLabel(found.problem),
 							check: `check ${found.problem.id}`,
-							note: "Grade it with the cs50 tool (cli_cs50): 'check <problem>'.",
+							note:
+								kind === "ai-rubric"
+									? "This problem has no autograder: the Check button (and your own review) reads the work against the assignment. Say 'check it' and I will grade it."
+									: kind === "none"
+										? "This problem has no autograder — read the spec and answer in the chat."
+										: "Grade it with the course tool (cli_course): 'check <problem>'.",
 						};
 					}
 					// commit

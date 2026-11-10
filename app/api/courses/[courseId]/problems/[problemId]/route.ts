@@ -30,7 +30,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ courseId: stri
 	const { courseId, problemId } = await ctx.params;
 	const found = find(courseId, problemId);
 	if (!found) return Response.json({ error: `no problem "${problemId}" in "${courseId}"` }, { status: 404 });
-	const prepared = prepareProblem(found.course, found.problem);
+	const prepared = await prepareProblem(found.course, found.problem);
 	return Response.json({
 		problem: found.problem,
 		unit: { id: found.unit.id, title: found.unit.title },
@@ -48,7 +48,7 @@ export async function PUT(req: Request, ctx: { params: Promise<{ courseId: strin
 	const name = typeof body?.name === "string" ? body.name : "";
 	const content = typeof body?.content === "string" ? body.content : null;
 	if (!name || content === null) return Response.json({ error: "name and content are required" }, { status: 400 });
-	const prepared = prepareProblem(found.course, found.problem);
+	const prepared = await prepareProblem(found.course, found.problem);
 	try {
 		saveProblemFile(prepared.folder, name, content);
 	} catch (err) {
@@ -61,7 +61,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ courseId: str
 	const { courseId, problemId } = await ctx.params;
 	const found = find(courseId, problemId);
 	if (!found) return Response.json({ error: `no problem "${problemId}" in "${courseId}"` }, { status: 404 });
-	prepareProblem(found.course, found.problem);
+	await prepareProblem(found.course, found.problem);
 	const result = await runProblem(found.course, found.problem);
 	return Response.json(result);
 }

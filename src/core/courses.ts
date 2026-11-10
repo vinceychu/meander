@@ -40,6 +40,19 @@ export interface CourseFile {
 	language: string;
 }
 
+/**
+ * How a problem is graded.
+ *
+ *   check50     the CS50 family's own grader (`check50 --local <slug>`)
+ *   autograder  the course's own client (`python3 ok --local` for CS61A)
+ *   tests       the course's test suite (pytest / npm test / make test /
+ *               cargo test / go test)
+ *   ai-rubric   nothing to run: the tutor reviews the work against the
+ *               assignment's rubric — labelled as NOT an official autograder
+ *   none        nothing to run: the learner reads and answers
+ */
+export type GraderKind = "check50" | "autograder" | "tests" | "ai-rubric" | "none";
+
 /** One problem (a CS50 "less"/"more" pair is two problems). */
 export interface CourseProblem {
 	/** Stable id inside the course ("mario-less"). The workspace folder name. */
@@ -65,6 +78,67 @@ export interface CourseProblem {
 	estimateMinutes: number;
 	/** How this problem is done — defaults to the course setting. */
 	mode?: ProblemMode;
+	/** How this problem is graded (absent = what its shape implies). */
+	grader?: GraderKind;
+	/** The command that runs the course's own grader (the `ok` client, the
+	 *  test suite) — absent when the course ships none. */
+	graderCommand?: string;
+	/** The folder (relative to the problem's folder) the course's code — and
+	 *  therefore its grader — lives in ("lab01/"). Empty = the problem's
+	 *  folder itself. */
+	graderWorkDir?: string;
+	/** The starter repository (cloned shallow into the workspace). */
+	repoUrl?: string;
+}
+
+/** One grader's verdict — the normalized shape every adapter returns. */
+export interface CourseGrade {
+	/** True when every check passed (and there was at least one). */
+	ok: boolean;
+	/** The [ok]/[FAIL] lines — what the tutor coaches from. */
+	lines: string[];
+	/** The checks that passed. */
+	passed: number;
+	/** The checks that ran. */
+	total: number;
+	/** The failing checks' causes (the grader's own words). */
+	causes: string[];
+	/** Which grader produced this verdict. */
+	grader: GraderKind;
+	/** The grader's raw output (for the app's output pane). */
+	output: string;
+}
+
+/** What an adapter needs to build a course. */
+export interface CourseRequest {
+	/** The course id on disk (the folder name). */
+	courseId: string;
+	/** The reference the learner gave (a catalogue id, a URL, a name). */
+	ref: string;
+	/** The course's home page (its site). */
+	source: string;
+	/** The page that lists the units (when the course has one). */
+	indexUrl?: string;
+	/** The display title. */
+	title: string;
+	/** The course's own edition label. */
+	edition?: string;
+}
+
+/** A resolved course reference — what the catalogue, a URL or a name gives. */
+export interface ResolvedCourse {
+	/** The course id on disk. */
+	courseId: string;
+	/** The reference the learner gave. */
+	ref: string;
+	/** The course's display title. */
+	title: string;
+	/** The course's home page. */
+	source: string;
+	/** The edition label, when the course states one. */
+	edition?: string;
+	/** Which adapter handles it ("cs50", "generic"). */
+	adapter: string;
 }
 
 /** One unit (a week, a module, a chapter — whatever the course calls it). */
@@ -289,14 +363,18 @@ export interface CourseService {
 	listCourses(): Course[];
 	/** One course (null when it does not exist). */
 	getCourse(courseId: string): Course | null;
+	/** Resolve a reference (a catalogue id, a course URL, a course name). */
+	resolveCourse(ref: string): Promise<ResolvedCourse>;
 	/** Fetch the syllabus and write the course record (the pages are cached). */
-	buildCourse(courseId: string): Promise<Course>;
+	buildCourse(courseId: string, request?: CourseRequest): Promise<Course>;
 	/** The unit's notes markdown. */
 	unitNotes(courseId: string, unit: CourseUnit): Promise<string>;
 	/** The lecture's sampled timeline — the REAL timestamps a segment may use. */
 	unitTimeline(courseId: string, unit: CourseUnit): Promise<Array<{ seconds: number; text: string }>>;
 	/** Prepare a problem's folder (starter files + the workspace catalogue). */
-	prepareProblem(course: Course, problem: CourseProblem): { folder: string; created: string[] };
+	prepareProblem(course: Course, problem: CourseProblem): Promise<{ folder: string; created: string[] }>;
+	/** Grade the learner's work in the problem's folder. */
+	gradeProblem(course: Course, problem: CourseProblem): Promise<CourseGrade>;
 	/** The problem's folder path. */
 	problemFolder(courseId: string, problemId: string): string;
 	/** The course's progress map. */

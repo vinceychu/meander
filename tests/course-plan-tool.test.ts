@@ -79,11 +79,28 @@ function serviceFixture() {
 	const service: CourseService = {
 		listCourses: () => [course],
 		getCourse: () => course,
+		resolveCourse: async (ref: string) => ({
+			courseId: "cs50x",
+			ref,
+			title: "CS50x",
+			source: "https://cs50.harvard.edu/x/",
+			edition: "2026",
+			adapter: "cs50",
+		}),
 		buildCourse: async () => course,
 		unitNotes: async () => "# Week 1 C\n\nThe notes.",
 		unitTimeline: async (_courseId: string, unit: CourseUnit) =>
 			unit.videoId === LECTURE ? TIMELINE : [],
-		prepareProblem: () => ({ folder: "/tmp/mario-less", created: [] }),
+		prepareProblem: async () => ({ folder: "/tmp/mario-less", created: [] }),
+		gradeProblem: async () => ({
+			ok: true,
+			lines: ["[ok] compiles"],
+			passed: 1,
+			total: 1,
+			causes: [],
+			grader: "check50",
+			output: "[ok] compiles\n1/1 checks passed",
+		}),
 		problemFolder: () => "/tmp/mario-less",
 		readProgress: () => progress,
 		updateProgress: (courseId, update) => {

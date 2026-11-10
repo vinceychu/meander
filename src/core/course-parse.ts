@@ -202,6 +202,9 @@ export interface UnitPage {
 	summary: string;
 	notesUrl: string;
 	psetUrl: string;
+	/** The unit's PROJECTS page (the CS50 family calls the problem sets
+	 *  "projects" in the AI and web courses). */
+	projectsUrl?: string;
 	/** The lecture's YouTube id (the CS50 player embeds it). */
 	videoId?: string;
 	/** The lecture's English subtitle track (timestamped). */
@@ -220,6 +223,8 @@ export function parseUnitPage(html: string, baseUrl: string): UnitPage {
 	const all = links(main);
 	const notes = all.find((l) => /\/notes\/[^/]+\/?$/.test(l.href));
 	const pset = all.find((l) => /\/psets\/[^/]+\/?$/.test(l.href));
+	// The AI and web courses call the same thing "projects".
+	const projects = all.find((l) => /\/projects\/[^/]+\/?$/.test(l.href));
 	// The lecture's video: the page's own player iframe first (the English
 	// one), then the first video link, then the youtu.be mirror.
 	const iframe = /video\.cs50\.io\/([A-Za-z0-9_-]{6,})/.exec(main);
@@ -237,6 +242,7 @@ export function parseUnitPage(html: string, baseUrl: string): UnitPage {
 		summary: summaryText,
 		notesUrl: notes ? absoluteUrl(notes.href, baseUrl) : "",
 		psetUrl: pset ? absoluteUrl(pset.href, baseUrl) : "",
+		...(projects ? { projectsUrl: absoluteUrl(projects.href, baseUrl) } : {}),
 		...(videoId ? { videoId } : {}),
 		...(subs ? { subtitlesUrl: absoluteUrl(subs.href, baseUrl) } : {}),
 		...(transcript ? { transcriptUrl: absoluteUrl(transcript.href, baseUrl) } : {}),
