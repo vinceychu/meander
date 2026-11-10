@@ -13,8 +13,11 @@ import {
 	LinkResolver,
 	noteTitle,
 	rewriteLinks,
+	relateVault,
 	searchNotes,
 	unlinkedMentions,
+	type RelatedEdge,
+	type RelatedHit,
 	type NoteMeta,
 	type VaultFile,
 	type VaultIndex,
@@ -97,6 +100,33 @@ export function notesBacklinks(path: string) {
 			)
 		: [];
 	return { linked, mentions };
+}
+
+let relatedMemo: { index: VaultIndex; edges: RelatedEdge[]; rank: (path: string, limit?: number) => RelatedHit[] } | null = null;
+
+function relatedFor(index: VaultIndex) {
+	if (relatedMemo?.index === index) return relatedMemo;
+	const files = new Map(index.files.map((f) => [f.path, f]));
+	const docs = index.notes.map((meta) => ({
+		path: meta.path,
+		title: meta.title,
+		text: (files.get(meta.path) ? cachedText(files.get(meta.path)!) : null) ?? "",
+	}));
+	const built = relateVault(docs);
+	relatedMemo = { index, edges: built.edges, rank: built.rank };
+	return relatedMemo;
+}
+
+/** Top similar notes for the Connections panel. Same scores as the dashed graph edges. */
+export function notesRelated(path: string): { path: string; title: string; score: number }[] {
+	const index = notesIndex();
+	if (!index.notes.some((n) => n.path === path)) return [];
+	return relatedFor(index).rank(path, 5).map((h) => ({ ...h, title: noteTitle(h.path) }));
+}
+
+/** Pairs above the similarity threshold, for the graph's dashed edges. */
+export function notesRelatedEdges(): RelatedEdge[] {
+	return relatedFor(notesIndex()).edges;
 }
 
 /** Rename/move a note, attachment or folder; rewrite every link to it. */

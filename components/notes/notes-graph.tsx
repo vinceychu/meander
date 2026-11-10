@@ -20,9 +20,10 @@ interface GNode extends SimulationNodeDatum {
 	degree: number;
 	group: string;
 }
-type GLink = SimulationLinkDatum<GNode> & { source: string | GNode; target: string | GNode };
+type GLink = SimulationLinkDatum<GNode> & { source: string | GNode; target: string | GNode; related?: boolean };
 
 const PALETTE = ["#5fb3a1", "#d38c5c", "#8f86d8", "#c9b458", "#d07aa6", "#6aa3d8", "#9cc06a", "#d06a6a"];
+const NO_RELATED_EDGES: readonly { source: string; target: string; score: number }[] = [];
 
 export function NotesGraph({
 	index,
@@ -31,6 +32,10 @@ export function NotesGraph({
 	depth = 1,
 	onOpen,
 	compact = false,
+	relatedEdges = NO_RELATED_EDGES,
+	showRelated = false,
+	onShowRelatedChange,
+	onOpenConnections,
 }: {
 	index: Notes.VaultIndex;
 	active: string | null;
@@ -38,6 +43,12 @@ export function NotesGraph({
 	depth?: number;
 	onOpen: (path: string) => void;
 	compact?: boolean;
+	/** Dashed similarity edges. Drawn only when `showRelated` is on. */
+	relatedEdges?: readonly { source: string; target: string; score: number }[];
+	showRelated?: boolean;
+	onShowRelatedChange?: (on: boolean) => void;
+	/** Empty-vault prompt: focus the Connections panel. */
+	onOpenConnections?: () => void;
 }) {
 	const wrap = useRef<HTMLDivElement>(null);
 	const canvas = useRef<HTMLCanvasElement>(null);
@@ -48,6 +59,7 @@ export function NotesGraph({
 	const [orphans, setOrphans] = useState(true);
 	const [filter, setFilter] = useState("");
 	const [localDepth, setLocalDepth] = useState(depth);
+	const noLinks = useMemo(() => Notes.noteLinkCount(index.notes) === 0, [index]);
 
 	const data = useMemo(() => {
 		const nodes = new Map<string, GNode>();
@@ -77,9 +89,29 @@ export function NotesGraph({
 				links.push({ source: n.path, target: `tag:${t.toLowerCase()}` });
 			}
 		}
+		const pairKey = (a: string, b: string) => (a < b ? `${a}\0${b}` : `${b}\0${a}`);
+		const realPairs = new Set<string>();
 		for (const l of links) {
+			realPairs.add(pairKey(l.source as string, l.target as string));
 			nodes.get(l.source as string)!.degree++;
 			nodes.get(l.target as string)!.degree++;
+		}
+		if (showRelated) {
+			const added = new Set<string>();
+			for (const e of relatedEdges) {
+				if (!nodes.has(e.source) || !nodes.has(e.target) || e.source === e.target) continue;
+				const key = pairKey(e.source, e.target);
+				if (realPairs.has(key) || added.has(key)) continue;
+				added.add(key);
+				links.push({ source: e.source, target: e.target, related: true });
+			}
+		}
+		// Degree stays "real links" so node size doesn't grow from suggestions.
+		// A note that only has related edges is still connected, so Orphans-off keeps it.
+		const linked = new Set<string>();
+		for (const l of links) {
+			linked.add(l.source as string);
+			linked.add(l.target as string);
 		}
 		let keep: Set<string> | null = null;
 		if (local && active) {
@@ -93,12 +125,12 @@ export function NotesGraph({
 			}
 		}
 		const q = filter.trim().toLowerCase();
-		let list = [...nodes.values()].filter((n) => (!keep || keep.has(n.id)) && (orphans || n.degree > 0 || n.id === active) && (!q || n.label.toLowerCase().includes(q) || n.id.toLowerCase().includes(q)));
+		let list = [...nodes.values()].filter((n) => (!keep || keep.has(n.id)) && (orphans || linked.has(n.id) || n.id === active) && (!q || n.label.toLowerCase().includes(q) || n.id.toLowerCase().includes(q)));
 		const ids = new Set(list.map((n) => n.id));
 		const ls = links.filter((l) => ids.has(l.source as string) && ids.has(l.target as string));
 		list = list.map((n) => ({ ...n }));
 		return { nodes: list, links: ls.map((l) => ({ ...l })), folders };
-	}, [index, local, active, localDepth, showTags, showGhosts, showAttachments, orphans, filter]);
+	}, [index, local, active, localDepth, showTags, showGhosts, showAttachments, orphans, filter, relatedEdges, showRelated]);
 
 	useEffect(() => {
 		const el = canvas.current;
@@ -155,17 +187,20 @@ export function NotesGraph({
 				const t = l.target as GNode;
 				if (s.x === undefined || t.x === undefined) continue;
 				const on = hover && (s.id === hover.id || t.id === hover.id);
-				ctx.strokeStyle = on ? accent : border;
-				ctx.globalAlpha = hover && !on ? 0.15 : on ? 0.9 : 0.6;
+				ctx.strokeStyle = on ? accent : l.related ? muted : border;
+				ctx.globalAlpha = hover && !on ? 0.08 : on ? 0.95 : l.related ? 0.55 : 0.6;
+				const dash = 4 / Math.max(transform.k, 0.4);
+				ctx.setLineDash(l.related ? [dash, dash] : []);
 				ctx.beginPath();
 				ctx.moveTo(s.x, s.y!);
 				ctx.lineTo(t.x, t.y!);
 				ctx.stroke();
 			}
+			ctx.setLineDash([]);
 			for (const n of nodes) {
 				if (n.x === undefined) continue;
 				const dim = hover && n.id !== hover.id && !lit!.has(n.id);
-				ctx.globalAlpha = dim ? 0.2 : 1;
+				ctx.globalAlpha = dim ? 0.12 : 1;
 				ctx.fillStyle = hover && n.id === hover.id ? accent : color(n);
 				ctx.beginPath();
 				ctx.arc(n.x, n.y!, radius(n), 0, Math.PI * 2);
@@ -196,7 +231,13 @@ export function NotesGraph({
 			ctx.globalAlpha = 1;
 		}
 		const sim = forceSimulation<GNode>(nodes)
-			.force("link", forceLink<GNode, GLink>(links).id((d) => d.id).distance(compact ? 40 : 60).strength(0.6))
+			.force(
+				"link",
+				forceLink<GNode, GLink>(links)
+					.id((d) => d.id)
+					.distance((l) => (l.related ? (compact ? 70 : 110) : compact ? 40 : 60))
+					.strength((l) => (l.related ? 0.15 : 0.6)),
+			)
 			.force("charge", forceManyBody().strength(compact ? -60 : -110))
 			.force("center", forceCenter(0, 0))
 			.force("x", forceX(0).strength(0.04))
@@ -283,8 +324,20 @@ export function NotesGraph({
 	return (
 		<div className="relative h-full w-full overflow-hidden" ref={wrap} data-testid={local ? "notes-local-graph" : "notes-graph"}>
 			<canvas ref={canvas} className="block touch-none" />
+			{!compact && !local && noLinks && (
+				<div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6">
+					<div className="pointer-events-auto max-w-sm rounded-lg border bg-popover/95 p-4 text-center shadow-lg backdrop-blur" data-testid="notes-graph-empty">
+						<p className="font-ui text-xs leading-relaxed text-foreground">No links yet — type [[ in a note to link it, or use Connections → Related to link suggestions</p>
+						{onOpenConnections && (
+							<button type="button" onClick={onOpenConnections} className="mt-3 rounded-md bg-primary px-3 py-1.5 font-ui text-xs font-medium text-primary-foreground hover:opacity-90">
+								Open Connections
+							</button>
+						)}
+					</div>
+				</div>
+			)}
 			{!compact && (
-				<div className="absolute right-3 top-3 flex w-52 flex-col gap-2 rounded-lg border bg-popover/95 p-3 font-ui text-xs shadow-lg backdrop-blur">
+				<div className="absolute right-3 top-3 z-20 flex w-52 flex-col gap-2 rounded-lg border bg-popover/95 p-3 font-ui text-xs shadow-lg backdrop-blur">
 					<input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter nodes…" className="rounded-md border bg-background px-2 py-1 text-xs" />
 					<label className="flex items-center justify-between gap-2">
 						Tags <input type="checkbox" checked={showTags} onChange={(e) => setShowTags(e.target.checked)} />
@@ -298,6 +351,12 @@ export function NotesGraph({
 					<label className="flex items-center justify-between gap-2">
 						Orphans <input type="checkbox" checked={orphans} onChange={(e) => setOrphans(e.target.checked)} />
 					</label>
+					{onShowRelatedChange && (
+						<label className="flex items-center justify-between gap-2" title="Dashed lines between notes with similar text. On by itself when the vault has fewer than 10 links.">
+							Related
+							<input type="checkbox" checked={showRelated} onChange={(e) => onShowRelatedChange(e.target.checked)} />
+						</label>
+					)}
 					{local && (
 						<label className="flex items-center justify-between gap-2">
 							Depth
@@ -305,7 +364,8 @@ export function NotesGraph({
 						</label>
 					)}
 					<div className="text-[10px] text-muted-foreground">
-						{data.nodes.length} nodes · {data.links.length} links
+						{data.nodes.length} nodes · {data.links.filter((l) => !l.related).length} links
+						{showRelated ? ` · ${data.links.filter((l) => l.related).length} related` : ""}
 					</div>
 				</div>
 			)}

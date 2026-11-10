@@ -123,6 +123,87 @@ describe("notes: reading view", () => {
 	});
 });
 
+describe("notes: related notes", () => {
+	const docs: N.RelatedDoc[] = [
+		{ path: "Linear algebra.md", title: "Linear algebra", text: "Eigenvalues and eigenvectors of a matrix." },
+		{ path: "Eigenvectors.md", title: "Eigenvectors", text: "An eigenvector of a matrix stays on its own span." },
+		{ path: "Groceries.md", title: "Groceries", text: "Milk, eggs, and bread for the week." },
+	];
+
+	it("ranks a short study note above an unrelated one", () => {
+		const ranked = N.rankRelated("Linear algebra.md", docs, 5);
+		assert.equal(ranked[0]?.path, "Eigenvectors.md");
+		assert.ok(ranked[0]!.score > 0.15);
+		const groceries = ranked.find((r) => r.path === "Groceries.md");
+		assert.ok(!groceries || groceries.score < ranked[0]!.score);
+		assert.ok(!ranked.some((r) => r.path === "Linear algebra.md"));
+	});
+
+	it("draws a dashed-edge pair only for notes that actually overlap", () => {
+		const edges = N.relatedEdges(docs);
+		assert.ok(edges.some((e) => e.source === "Eigenvectors.md" && e.target === "Linear algebra.md"));
+		assert.ok(!edges.some((e) => e.source === "Groceries.md" || e.target === "Groceries.md"));
+	});
+
+	it("ignores code fences and stopwords", () => {
+		const coded: N.RelatedDoc[] = [
+			{ path: "a.md", title: "Apple pie", text: "```\nmitochondria atp respiration\n```\nA butter crust and sliced apples." },
+			{ path: "b.md", title: "Railway", text: "```\nmitochondria atp respiration\n```\nTimetables, platforms, and stations." },
+		];
+		assert.equal(N.rankRelated("a.md", coded, 5).length, 0);
+		assert.equal(N.relatedEdges(coded).length, 0);
+	});
+
+	it("relates notes that share CJK words", () => {
+		const zh: N.RelatedDoc[] = [
+			{ path: "a.md", title: "线粒体", text: "线粒体在细胞呼吸中产生能量。" },
+			{ path: "b.md", title: "细胞呼吸", text: "细胞呼吸依靠线粒体产生能量。" },
+			{ path: "c.md", title: "面包", text: "酸面团需要面粉和水。" },
+		];
+		const ranked = N.rankRelated("a.md", zh, 5);
+		assert.equal(ranked[0]?.path, "b.md");
+		const bread = ranked.find((r) => r.path === "c.md");
+		assert.ok(!bread || bread.score < ranked[0]!.score);
+	});
+
+	it("counts note links, not attachments or self-links", () => {
+		const texts: Record<string, string> = {
+			"A.md": "See [[B]] and [[Ghost]] and ![[pic.png]]. [[A]]",
+			"B.md": "Back to [[A]].",
+			"C.md": "No links here.",
+		};
+		const idx = N.buildIndex([...Object.keys(texts), "pic.png"].map(f), (p) => texts[p] ?? null);
+		assert.equal(N.noteLinkCount(idx.notes), 3);
+		assert.ok(N.noteLinkCount(idx.notes) < N.RELATED_EDGES_AUTO_MAX_LINKS);
+	});
+});
+
+describe("notes: append related link", () => {
+	it("creates a Related heading at the end", () => {
+		assert.equal(N.appendRelatedLink("Body text.", "Eigenvectors"), "Body text.\n\n## Related\n[[Eigenvectors]]\n");
+		assert.equal(N.appendRelatedLink("", "Eigenvectors"), "## Related\n[[Eigenvectors]]\n");
+	});
+
+	it("appends under an existing heading and does not duplicate", () => {
+		const once = N.appendRelatedLink("# T\n\n## Related\n[[A]]\n\n## Next\nnope\n", "B");
+		assert.equal(once, "# T\n\n## Related\n[[A]]\n[[B]]\n\n## Next\nnope\n");
+		assert.equal(N.appendRelatedLink(once, "B"), once);
+		assert.equal(N.appendRelatedLink("## related\n[[B|alias]]\n", "B"), "## related\n[[B|alias]]\n");
+	});
+
+	it("does not treat a fenced heading as the section", () => {
+		const text = "```\n## Related\n```\nBody";
+		const out = N.appendRelatedLink(text, "Other");
+		assert.match(out, /```\n## Related\n```/);
+		assert.match(out, /Body\n\n## Related\n\[\[Other\]\]\n$/);
+	});
+
+	it("rejects a target that would break the wikilink", () => {
+		assert.equal(N.appendRelatedLink("x", "Bad]name"), "x");
+		assert.equal(N.appendRelatedLink("x", "  "), "x");
+	});
+});
+
 describe("notes: reading view links", () => {
 	it("keeps same-note heading links as links, not tags", () => {
 		const out = N.preprocessForReading("[[#Intro]] and #real", { resolve: () => null });
