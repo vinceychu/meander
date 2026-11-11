@@ -1,7 +1,6 @@
 "use client";
-import { useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
-import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { HostDialog } from "@/components/host-dialog";
+import type { CloseOutcome } from "@/components/interaction-layers";
 import { Button } from "@/components/ui/button";
 
 export function ConnectionRow({ label, action, actionVariant, disabled, onAction, children, testid, actionTestid, labelClassName, actionClassName }: { label: string; action: string; actionVariant?: "outline" | "ghost"; disabled: boolean; onAction: () => void; children?: React.ReactNode; testid?: string; actionTestid?: string; labelClassName?: string; actionClassName?: string }) {
@@ -20,6 +19,7 @@ export function ConnectionFooter({ leading, children, testid }: { leading?: Reac
 	</div>;
 }
 
+<<<<<<< HEAD
 export function ConnectionDialog({ children, onClose, busy, label, testid, backdropTestid }: { children: React.ReactNode; onClose: () => void; busy: boolean; label: string; testid: string; backdropTestid: string }) {
 	const ref = useRef<HTMLDivElement>(null), closeRef = useRef(onClose);
 	closeRef.current = onClose;
@@ -43,4 +43,12 @@ export function ConnectionDialog({ children, onClose, busy, label, testid, backd
 	return createPortal(<div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80" data-testid={backdropTestid} {...backdropDismiss}>
 		<div ref={ref} role="dialog" aria-modal="true" aria-label={label} aria-busy={busy} data-testid={testid} onClick={(event) => event.stopPropagation()} className="settings-dialog-pop mx-4 max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-md border border-border bg-card p-5 font-sans text-sm shadow-xl">{children}</div>
 	</div>, document.body);
+=======
+export function ConnectionDialog({ children, onClose, busy, label, testid, backdropTestid }: { children: React.ReactNode; onClose: () => CloseOutcome; busy: boolean; label: string; testid: string; backdropTestid: string }) {
+	return <HostDialog open onClose={onClose} aria-label={label}
+		backdropProps={{ className: "fixed inset-0 z-[60] flex items-center justify-center bg-background/80", "data-testid": backdropTestid }}
+		frame={<div aria-busy={busy} data-testid={testid} onClick={(event) => event.stopPropagation()} className="settings-dialog-pop mx-4 max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-md border border-border bg-card p-5 shadow-xl" />}>
+		{children}
+	</HostDialog>;
+>>>>>>> a63664767ebdd7e5af08f7f501b720e02b2ddc32
 }
