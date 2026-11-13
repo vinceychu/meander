@@ -52,7 +52,7 @@ import { NoteEditor, type EditorHost, type NoteEditorHandle } from "./note-edito
 import { NoteReader } from "./note-reader";
 import { NotesGraph } from "./notes-graph";
 import { BaseView } from "./base-view";
-import { ThemeToggle } from "@/components/theme";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { SessionStarter } from "@/components/start-session";
 
 // ─── Types / prefs ──────────────────────────────────────────────────────────

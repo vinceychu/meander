@@ -114,7 +114,7 @@ function NotesProgressSection({ progress }: { progress: NotesProgress }) {
 													</span>
 												</div>
 												<div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-													<div className={p === 100 ? "h-full bg-green-500/80" : "h-full bg-primary/70"} style={{ width: `${p}%` }} />
+													<div className={p === 100 ? "h-full bg-success/80" : "h-full bg-primary/70"} style={{ width: `${p}%` }} />
 												</div>
 											</a>
 										</li>

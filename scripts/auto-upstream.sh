@@ -49,6 +49,20 @@ PUSH_URL=${MEANDER_PUSH_URL:-}
 git merge --abort >/dev/null 2>&1; git reset -q --hard; git clean -qfdx -e node_modules
 git fetch -q origin main --tags || { notify "fetch failed" high; exit 1; }
 git checkout -q -B main origin/main
+# Same Node major as CI (release.yml), so a gate never fails here for a
+# reason GitHub wouldn't hit. Fetched once into ~/.local/nodes/<major>.
+use_ci_node() {
+	local major; major=$(grep -m1 -oE 'node-version: *"?[0-9]+' .github/workflows/release.yml | grep -oE '[0-9]+$')
+	[ -z "$major" ] && return 0
+	local dir=$HOME/.local/nodes/$major
+	if [ ! -x "$dir/bin/node" ]; then
+		local v; v=$(curl -fsS https://nodejs.org/dist/index.json | python3 -c "import json,sys;print([r['version'] for r in json.load(sys.stdin) if r['version'].startswith('v$major.')][0])") || return 0
+		mkdir -p "$HOME/.local/nodes" && curl -fsSL "https://nodejs.org/dist/$v/node-$v-linux-x64.tar.xz" | tar xJ -C "$HOME/.local/nodes" && ln -sfn "$HOME/.local/nodes/node-$v-linux-x64" "$dir"
+	fi
+	[ -x "$dir/bin/node" ] && export PATH="$dir/bin:$PATH"
+	log "node $(node -v) (CI wants $major)"
+}
+use_ci_node
 # Testing only: pretend Meander is synced to an older upstream commit.
 if [ -n "${MEANDER_FORCE_BASE:-}" ]; then
 	sed -i "s/^commit=.*/commit=$MEANDER_FORCE_BASE/" .upstream-sync
@@ -65,7 +79,8 @@ BASE=$(sed -n 's/^commit=//p' .upstream-sync)
 
 # Baseline: tests that already fail on main (Linux-only quirks etc.).
 heavy npm ci --no-audit --no-fund >/dev/null || { notify "npm ci failed on main" high; exit 1; }
-run_tests() { NODE_ENV=test heavy npx tsx --test tests/*.test.ts tests/*.test.tsx 2>&1 | sed -n 's/^not ok [0-9]* - //p' | sort -u; }
+grep -q '"plugins:setup"' package.json && heavy npm run -s plugins:setup >/dev/null 2>&1
+run_tests() { NODE_ENV=test heavy npx tsx --test --test-reporter=tap tests/*.test.ts tests/*.test.tsx 2>&1 | sed -n 's/^not ok [0-9]* - //p' | sort -u; }
 BASELINE=$(run_tests)
 log "baseline failures on main: $(echo "$BASELINE" | grep -c . )"
 
@@ -76,21 +91,40 @@ SUBJECTS=$(git log --first-parent --format='- %s' "$BASE..$TIP" | grep -v -E '^-
 
 CONFLICTS=$(git diff --name-only --diff-filter=U)
 if [ -n "$CONFLICTS" ]; then
-	log "conflicts: $(echo $CONFLICTS)"
-	FAIL="merge conflicts in $(echo $CONFLICTS)"
+	log "conflicts in $(echo "$CONFLICTS" | wc -l) file(s): $(echo $CONFLICTS)"
+	# git couldn't settle them: hand them to Claude Code (scripts/ai-resolve.sh),
+	# which keeps every upstream feature and every Meander change. The gates
+	# below still decide whether anything ships.
+	if bash scripts/ai-resolve.sh conflicts; then
+		log "ai-resolve settled the conflicts"
+	else
+		CONFLICTS=$(git diff --name-only --diff-filter=U)
+		FAIL="merge conflicts in $(echo $CONFLICTS) (ai-resolve couldn't settle them)"
+	fi
 fi
 
+GLOG=$HOME/.cache/meander-autosync-gates.txt
 gates() {
-	heavy npm ci --no-audit --no-fund >/dev/null || { echo "npm ci"; return; }
-	npm run -s typecheck >/tmp/meander-autosync-tsc.txt 2>&1 || { echo "typecheck"; return; }
-	npx eslint . >/tmp/meander-autosync-lint.txt 2>&1 || { echo "lint"; return; }
+	: >"$GLOG"
+	heavy npm ci --no-audit --no-fund >>"$GLOG" 2>&1 || heavy npm install --no-audit --no-fund >>"$GLOG" 2>&1 || { echo "npm ci"; return; }
+	if grep -q '"plugins:setup"' package.json; then { echo "== npm run plugins:setup"; heavy npm run -s plugins:setup; } >>"$GLOG" 2>&1 || { echo "plugins:setup"; return; }; fi
+	{ echo "== npm run typecheck"; npm run -s typecheck; } >>"$GLOG" 2>&1 || { echo "typecheck"; return; }
+	{ echo "== npx eslint ."; npx eslint .; } >>"$GLOG" 2>&1 || { echo "lint"; return; }
 	local new; new=$(comm -13 <(echo "$BASELINE") <(run_tests))
-	[ -n "$new" ] && { echo "new test failures: $(echo "$new" | tr '\n' ';')"; return; }
-	heavy npx next build >/tmp/meander-autosync-build.txt 2>&1 || { echo "next build"; return; }
+	[ -n "$new" ] && { printf '== new test failures (run: npx tsx --test <file>)\n%s\n== baseline failures on main (ignore)\n%s\n' "$new" "$BASELINE" >>"$GLOG"; echo "new test failures: $(echo "$new" | tr '\n' ';')"; return; }
+	{ echo "== npm run build"; heavy npm run -s build; } >>"$GLOG" 2>&1 || { echo "next build"; return; }
 }
 if [ -z "${FAIL:-}" ]; then
 	git add -A
 	FAIL=$(gates)
+	# Merge fallout (types, lint, tests, build): up to 2 Claude fix rounds.
+	for round in 1 2; do
+		[ -z "$FAIL" ] && break
+		log "gates failed ($FAIL); ai-resolve fix round $round"
+		bash scripts/ai-resolve.sh gates "$GLOG" || true
+		git add -A
+		FAIL=$(gates)
+	done
 fi
 
 DATE=$(date +%F)
@@ -98,7 +132,15 @@ if [ -n "$FAIL" ]; then
 	git add -A
 	git -c user.name="Meander autosync" -c user.email="vinceychu@users.noreply.github.com" commit -qm "WIP upstream sync to ${TIP:0:7} (failed: $FAIL)" --no-verify || true
 	[ $DRY = 0 ] && git push -qf origin "HEAD:refs/heads/upstream-sync/$DATE"
-	notify "Upstream merge of $COUNT commits needs you: $FAIL. Branch upstream-sync/$DATE" high
+	# One notification per distinct failure; the timer keeps retrying (upstream
+	# fixes and a fresh AI attempt often clear it) and never needs re-enabling.
+	SIG=$(printf '%s' "$FAIL" | md5sum | cut -c1-12)
+	if [ "$(cat "$HOME/.cache/meander-autosync.lastfail" 2>/dev/null)" != "$SIG" ]; then
+		notify "Meander couldn't take $COUNT LearnHarness commits yet: ${FAIL:0:300}. Retrying every 6h; attempt on branch upstream-sync/$DATE" high
+		echo "$SIG" >"$HOME/.cache/meander-autosync.lastfail"
+	else
+		log "same failure as last run; not notifying again"
+	fi
 	exit 1
 fi
 
@@ -134,4 +176,5 @@ fi
 # Serve mode checks on launch, installs, exits; systemd brings it back new.
 systemctl --user restart meander.service
 notify "Meander $NEW released: $COUNT upstream LearnHarness commits merged. This PC's server is updating; the phone gets it on next open."
+rm -f "$HOME/.cache/meander-autosync.lastfail"
 log "=== done: v$NEW"

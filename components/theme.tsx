@@ -1,28 +1,32 @@
 "use client";
 /**
  * Light/dark switch (2026-11-06). The mode is a per-device preference
- * (localStorage "lh:theme": "dark" | "light" | "system"), applied as the
- * `dark` class on <html>. THEME_BOOT_SCRIPT runs before first paint (inlined
- * in app/layout.tsx) so a light-mode reload never flashes dark.
+ * (localStorage "lh:theme": "dark" | "light" | "system"). Merged onto the
+ * upstream theme system (2026-11-13): the record's theme still picks the
+ * palette, the switch picks the variant — a theme of the other variant
+ * yields to its counterpart (core/themes.ts themeForMode), and the
+ * AppearanceProvider applies the result (class + color variables). A
+ * device that never touched the switch follows the record's theme.
  *
- * Every surface is token-driven (app/globals.css :root = day, .dark = night),
- * so flipping the class is the whole switch; canvas/diagram renderers that
- * bake colors read `useTheme().resolved` to re-render.
+ * The server renders the record's theme on <html>; themeBootScript
+ * (components/theme-boot.ts) runs before first paint (inlined in
+ * app/layout.tsx) and swaps to the counterpart when this device's mode
+ * disagrees, so a reload never flashes the wrong variant. The sun/moon
+ * button is components/theme-toggle.tsx.
  */
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { MoonIcon, SunIcon } from "lucide-react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { THEME_KEY } from "./theme-boot.ts";
+
+export { THEME_KEY };
 
 export type ThemeMode = "dark" | "light" | "system";
-export const THEME_KEY = "lh:theme";
 
-export const THEME_BOOT_SCRIPT = `(function(){try{var m=localStorage.getItem("${THEME_KEY}")||"dark";var d=m==="system"?matchMedia("(prefers-color-scheme: dark)").matches:m!=="light";var c=document.documentElement.classList;d?c.add("dark"):c.remove("dark");}catch(e){}})();`;
-
-function readMode(): ThemeMode {
+function readMode(): ThemeMode | null {
 	try {
 		const v = localStorage.getItem(THEME_KEY);
-		return v === "light" || v === "system" ? v : "dark";
+		return v === "dark" || v === "light" || v === "system" ? v : null;
 	} catch {
-		return "dark";
+		return null;
 	}
 }
 
@@ -31,24 +35,34 @@ function systemDark(): boolean {
 }
 
 interface ThemeValue {
-	mode: ThemeMode;
-	resolved: "dark" | "light";
+	/** This device's stored mode; null = never set (follow the theme). */
+	mode: ThemeMode | null;
+	/** The variant the device asks for; null = whatever the theme is. */
+	resolved: "dark" | "light" | null;
+	/** False until this device's stored mode is read (the boot script
+	 *  already painted it; the appearance provider waits rather than flash). */
+	ready: boolean;
 	setMode: (mode: ThemeMode) => void;
-	toggle: () => void;
 }
 
-const ThemeContext = createContext<ThemeValue>({ mode: "dark", resolved: "dark", setMode: () => {}, toggle: () => {} });
+/** Outside a ThemeProvider (tests, bare renders): follow the theme. */
+const ThemeContext = createContext<ThemeValue>({ mode: null, resolved: null, ready: true, setMode: () => {} });
 
 export function useTheme() {
 	return useContext(ThemeContext);
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-	const [mode, setModeState] = useState<ThemeMode>("dark");
+	const [mode, setModeState] = useState<ThemeMode | null>(null);
 	const [sysDark, setSysDark] = useState(true);
-	useEffect(() => {
+	const [ready, setReady] = useState(false);
+	// A LAYOUT effect: the stored mode lands before the first paint.
+	useLayoutEffect(() => {
 		setModeState(readMode());
 		setSysDark(systemDark());
+		setReady(true);
+	}, []);
+	useEffect(() => {
 		const mq = matchMedia("(prefers-color-scheme: dark)");
 		const onChange = () => setSysDark(mq.matches);
 		mq.addEventListener("change", onChange);
@@ -61,12 +75,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 			window.removeEventListener("storage", onStorage);
 		};
 	}, []);
-	const resolved: "dark" | "light" = mode === "system" ? (sysDark ? "dark" : "light") : mode;
-	useEffect(() => {
-		document.documentElement.classList.toggle("dark", resolved === "dark");
-		const meta = document.querySelector('meta[name="theme-color"]');
-		if (meta) meta.setAttribute("content", resolved === "dark" ? "#141818" : "#faf9f6");
-	}, [resolved]);
+	const resolved = mode === "system" ? (sysDark ? "dark" : "light") : mode;
 	const setMode = useCallback((next: ThemeMode) => {
 		setModeState(next);
 		try {
@@ -75,25 +84,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 			/* private mode: the switch still works for this page */
 		}
 	}, []);
-	const toggle = useCallback(() => setMode(resolved === "dark" ? "light" : "dark"), [resolved, setMode]);
-	const value = useMemo(() => ({ mode, resolved, setMode, toggle }), [mode, resolved, setMode, toggle]);
+	const value = useMemo(() => ({ mode, resolved, ready, setMode }), [mode, resolved, ready, setMode]);
 	return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
-}
-
-/** The sun/moon button (sidebar footer, notes toolbar). */
-export function ThemeToggle({ className = "" }: { className?: string }) {
-	const { resolved, toggle } = useTheme();
-	const label = resolved === "dark" ? "Switch to day mode" : "Switch to night mode";
-	return (
-		<button
-			type="button"
-			onClick={toggle}
-			aria-label={label}
-			title={label}
-			data-testid="theme-toggle"
-			className={`flex items-center justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground ${className}`}
-		>
-			{resolved === "dark" ? <SunIcon className="size-3.5" /> : <MoonIcon className="size-3.5" />}
-		</button>
-	);
 }

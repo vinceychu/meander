@@ -10,7 +10,7 @@ import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, f
 import { select } from "d3-selection";
 import { zoom, zoomIdentity, type ZoomTransform } from "d3-zoom";
 import { Notes } from "@/src/core";
-import { useTheme } from "@/components/theme";
+import { useAppearance } from "@/components/settings/appearance";
 
 type Kind = "note" | "tag" | "ghost" | "attachment";
 interface GNode extends SimulationNodeDatum {
@@ -52,7 +52,7 @@ export function NotesGraph({
 }) {
 	const wrap = useRef<HTMLDivElement>(null);
 	const canvas = useRef<HTMLCanvasElement>(null);
-	const { resolved: theme } = useTheme();
+	const { resolvedMode: theme } = useAppearance();
 	const [showTags, setShowTags] = useState(false);
 	const [showGhosts, setShowGhosts] = useState(!compact);
 	const [showAttachments, setShowAttachments] = useState(false);

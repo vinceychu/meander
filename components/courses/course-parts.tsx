@@ -44,7 +44,7 @@ export function ProblemStatusBadge({ status }: { status: ProblemStatus }) {
 	}
 	if (status === "in-progress") {
 		return (
-			<span className="inline-flex items-center gap-1 font-ui text-[11px] uppercase tracking-wider text-amber-600 dark:text-amber-400">
+			<span className="inline-flex items-center gap-1 font-ui text-[11px] uppercase tracking-wider text-warning">
 				<Loader2Icon className="size-3" />
 				In progress
 			</span>

@@ -12,14 +12,14 @@
  */
 
 import type { CoursesSettings } from "@/src/core";
-import { CommitInput, SettingsRow, ThinSelect } from "./controls.tsx";
+import { CommitInput, SettingsRow, ThinSelect, type SettingsCommitResult } from "./controls.tsx";
 
 export function CoursesSection({
 	courses,
 	onSectionChange,
 }: {
 	courses: CoursesSettings | undefined;
-	onSectionChange: (next: CoursesSettings) => void;
+	onSectionChange: (next: CoursesSettings) => SettingsCommitResult;
 }) {
 	const workspaceRoot = courses?.workspaceRoot ?? "~/cs50";
 	const vscodeHost = courses?.vscodeHost ?? "5090v1";
@@ -62,7 +62,7 @@ export function CoursesSection({
 					value={defaultMode}
 					ariaLabel="Default problem mode"
 					testid="courses-default-mode-select"
-					onChange={(next) => onSectionChange({ ...courses, defaultMode: next === "vscode" ? "vscode" : "app" })}
+					onChange={(next) => void onSectionChange({ ...courses, defaultMode: next === "vscode" ? "vscode" : "app" })}
 				>
 					<option value="app">In the app</option>
 					<option value="vscode">In VS Code</option>
