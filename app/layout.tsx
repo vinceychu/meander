@@ -8,6 +8,7 @@ import { ActivityProvider } from "@/components/activity-dock";
 import { ServerEventsProvider } from "@/components/server-events";
 import { AppearanceProvider } from "@/components/settings/appearance";
 import UpdateBanner from "@/components/update-banner";
+import { MobileShell } from "@/components/mobile-shell";
 import { ThemeProvider } from "@/components/theme";
 import { themeBootScript } from "@/components/theme-boot";
 import { PluginsProvider } from "@/components/plugins";
@@ -26,7 +27,7 @@ export const metadata: Metadata = {
 	description: "A teacher agent with a memory — sessions, quizzes, and a knowledge graph of what you know.",
 };
 
-export const viewport: Viewport = { themeColor: "#141818" };
+export const viewport: Viewport = { themeColor: "#141818", viewportFit: "cover" };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
 	// The theme is server-rendered — its class AND its color variables —
@@ -59,6 +60,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 						<SidebarProvider>
 							<ActivityProvider>
 								<AppShell>{children}</AppShell>
+								{/* Phone app feel (2026-11-14): swipes + bottom tab bar. */}
+								<MobileShell />
 							</ActivityProvider>
 						</SidebarProvider>
 					</AppearanceProvider>

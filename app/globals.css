@@ -747,3 +747,15 @@ details.lh-callout > summary::-webkit-details-marker { display: none; }
 .lh-note-reading li:has(> input.lh-note-task), .lh-note-reading li:has(> p > input.lh-note-task) { list-style: none; margin-left: -1.25em; }
 .lh-note-editor .cm-lp-callout-title { font-weight: 650; color: var(--lh-callout, var(--lh-link)); }
 .lh-note-editor .cm-lp-callout .cm-lp-heading, .lh-note-editor .cm-line.cm-lp-callout:first-of-type { font-weight: 600; }
+
+/* MOBILE SHELL (2026-11-14): room for the bottom tab bar + iPhone safe areas; the composer's control row scrolls sideways
+   instead of wrapping into a tall stack on a phone. */
+@media (max-width: 767px) {
+	html.lh-tabbar body { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+	html.lh-tabbar [data-testid="stats-bar"] { margin-bottom: calc(56px + env(safe-area-inset-bottom)); }
+	[data-testid="stats-bar"] > div:first-child { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; }
+	[data-testid="stats-bar"] > div:first-child::-webkit-scrollbar { display: none; }
+	[data-testid="stats-bar"] button { white-space: nowrap; }
+	body { padding-top: env(safe-area-inset-top); overscroll-behavior-x: none; }
+	button, a { -webkit-tap-highlight-color: transparent; }
+}
