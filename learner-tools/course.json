@@ -1,0 +1,10 @@
+{
+  "name": "course",
+  "description": "The course problem-set grader on the learner's own machine — any course, not just CS50. Input is one course subcommand line: 'list' (the course's problems, which are set up locally, and how each is graded), 'start <problem>' (create the problem's folder with its starter files and print the task), 'task <problem>' (print the task), 'check <problem>' (grade the learner's work: one [ok]/[FAIL] line per requirement — check50 for the CS50 family, the course's own autograder or test suite for everything else), 'style <problem>' (run style50 on the source file, CS50 courses), 'submit-info <problem>' (print the submit50 command — the learner submits himself; this tool never submits), 'doctor' (report the toolchain per language: gcc, g++, clang, python3, pytest, node, npm, sqlite3, go, rustc, git), 'setup' (install the CS50 toolchain without sudo). Coach from the check output; never hand over a solution unless the learner asks for one after trying.",
+  "command": "./course-tool.py",
+  "stdin": true,
+  "inputDescription": "course subcommand, e.g. 'start mario-less' or 'check mario-less'",
+  "timeoutSeconds": 600,
+  "default": true,
+  "sandbox": false
+}

@@ -1,0 +1,43 @@
+name: Upstream check
+
+# Weekly: if LearnHarness (upstream) has commits Meander hasn't merged,
+# open or update one issue listing them. Merge with scripts/sync-upstream.sh.
+
+on:
+  schedule:
+    - cron: "17 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Count pending upstream commits
+        id: pending
+        run: |
+          out=$(bash scripts/sync-upstream.sh --check)
+          echo "$out"
+          n=$(echo "$out" | head -1 | cut -d' ' -f1)
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+          { echo 'body<<EOF_BODY'; echo '```'; echo "$out"; echo '```'; echo; echo 'Merge with `scripts/sync-upstream.sh`.'; echo 'EOF_BODY'; } >> "$GITHUB_OUTPUT"
+      - name: Open or update the issue
+        if: steps.pending.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ steps.pending.outputs.body }}
+          COUNT: ${{ steps.pending.outputs.count }}
+        run: |
+          title="Upstream LearnHarness: $COUNT new commit(s) to merge"
+          num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label upstream-sync --json number --jq '.[0].number // empty')
+          if [ -n "$num" ]; then
+            gh issue edit "$num" --repo "$GITHUB_REPOSITORY" --title "$title" --body "$BODY"
+          else
+            gh label create upstream-sync --repo "$GITHUB_REPOSITORY" --color 0e8a16 2>/dev/null || true
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$BODY" --label upstream-sync
+          fi

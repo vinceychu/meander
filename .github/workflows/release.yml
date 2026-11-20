@@ -1,0 +1,141 @@
+name: Release
+
+# builds the Linux AppImage/deb and the Intel macOS app, uploads them into
+# one draft release, then publishes it. Installed apps check this
+# repo's latest release and update themselves.
+#
+# Merge = release (2026-11-06): a push to main whose package.json version
+# has no release yet builds and publishes v<version> (the release creates
+# the tag). No tag push needed, so no machine needs GitHub credentials.
+# Pushing a v* tag by hand still works; so does "Run workflow".
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json, .github/workflows/release.yml]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  version:
+    name: Decide the release
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      go: ${{ steps.v.outputs.go }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            [ "$GITHUB_REF_NAME" = "$tag" ] || { echo "::error::tag $GITHUB_REF_NAME != package.json $tag"; exit 1; }
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          elif [ "$(gh release view "$tag" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)" = "false" ]; then
+            echo "$tag is already released; nothing to do."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  gates:
+    name: Typecheck + lint
+    needs: version
+    if: needs.version.outputs.go == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+          cache: npm
+      - run: npm ci
+      - run: npm run plugins:setup
+      - run: npm run typecheck
+      - run: npm run lint
+
+  draft:
+    name: Create the draft
+    needs: [version, gates]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=${{ needs.version.outputs.tag }}
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" --title "${TAG#v}" --notes "Meander ${TAG#v}"
+
+  package:
+    name: Package (${{ matrix.platform }})
+    needs: draft
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x64
+            builder_args: --linux --x64
+          # Intel Mac. Ad-hoc signed (no Apple Developer ID): the app's own
+          # mac-self-update.cjs installs updates, since Squirrel.Mac can't.
+          - os: macos-15-intel
+            platform: mac-x64
+            builder_args: --mac --x64 -c.mac.notarize=false -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.icon=build/icon.icns
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+          cache: npm
+      - run: npm ci
+      - run: npm run plugins:setup
+      - run: npm run build
+      - run: node scripts/smoke-provider-runtime.mjs
+      - run: node scripts/build-server.mjs
+      - run: node scripts/smoke-server.mjs
+      - name: Build and upload to the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npx electron-builder ${{ matrix.builder_args }} --publish always
+
+  publish:
+    name: Publish the release
+    needs: [version, package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=${{ needs.version.outputs.tag }}
+          assets=$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          echo "$assets"
+          for need in latest-linux.yml latest-mac.yml; do
+            echo "$assets" | grep -qx "$need" || { echo "::error::missing $need"; exit 1; }
+          done
+          gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --draft=false --latest
