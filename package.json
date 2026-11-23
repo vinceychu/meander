@@ -29,6 +29,7 @@
 		"desktop:dist:mac-unsigned": "rm -rf dist .next/standalone && npm run build && node scripts/smoke-provider-runtime.mjs && node scripts/build-server.mjs && node scripts/smoke-server.mjs && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac $(node -p \"'--'+process.arch\") --publish never -c.mac.notarize=false -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.icon=build/icon.icns"
 	},
 	"dependencies": {
+<<<<<<< HEAD
 		"@codemirror/autocomplete": "^6.20.4",
 		"@codemirror/commands": "^6.11.1",
 		"@codemirror/lang-html": "^6.4.12",
@@ -42,6 +43,10 @@
 		"@earendil-works/pi-ai": "1.4.0",
 		"@lezer/highlight": "^1.2.5",
 		"@lezer/markdown": "^1.8.1",
+=======
+		"@earendil-works/pi-agent-core": "1.5.2",
+		"@earendil-works/pi-ai": "1.5.2",
+>>>>>>> 069a6a11fb99e6d1388fba0e6680bbc8cf7921ce
 		"@modelcontextprotocol/sdk": "1.32.1",
 		"@mozilla/readability": "^0.6.0",
 		"@radix-ui/react-focus-scope": "1.1.16",
@@ -56,7 +61,6 @@
 		"@streamdown/math": "^1.0.2",
 		"@streamdown/mermaid": "^1.0.2",
 		"@xyflow/react": "^12.11.3",
-		"ansi-to-react": "^6.2.6",
 		"aria-hidden": "1.2.6",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
@@ -79,14 +83,13 @@
 		"micromark-extension-math": "3.1.0",
 		"motion": "^13.1.1",
 		"nanoid": "^6.0.1",
-		"next": "^16.4.3",
+		"next": "^16.4.6",
 		"next-themes": "^0.4.6",
 		"pdfjs-dist": "^6.3.289",
 		"puppeteer-core": "^25.8.0",
 		"radix-ui": "^1.6.7",
 		"react": "^19.2.8",
 		"react-dom": "^19.2.8",
-		"react-jsx-parser": "^2.4.1",
 		"react-remove-scroll": "2.7.2",
 		"remark-breaks": "^4.0.0",
 		"streamdown": "^2.5.0",
@@ -102,7 +105,7 @@
 		"katex": "$katex"
 	},
 	"devDependencies": {
-		"@next/eslint-plugin-next": "^16.4.3",
+		"@next/eslint-plugin-next": "^16.4.6",
 		"@tailwindcss/postcss": "^4.3.3",
 		"@types/node": "^24.0.0",
 		"@types/react": "^19.2.18",
