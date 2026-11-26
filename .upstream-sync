@@ -2,4 +2,4 @@
 # uses it as the merge base and rewrites it after a sync.
 repo=https://github.com/amosblomqvist/learnharness
 branch=main
-commit=069a6a11fb99e6d1388fba0e6680bbc8cf7921ce
+commit=e3cfff6ee7b91d94cd7ed3eea0dcbf8807773fe8
